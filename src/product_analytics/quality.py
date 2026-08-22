@@ -4,6 +4,8 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from .config import PRODUCTS
+
 
 REQUIRED_COLUMNS = {
     "event_id",
@@ -13,6 +15,8 @@ REQUIRED_COLUMNS = {
     "event_ts",
     "revenue_gbp",
 }
+ALLOWED_PRODUCTS = {product.name for product in PRODUCTS}
+ALLOWED_EVENT_TYPES = {"first_open", "trial_start", "paid_subscription", "purchase"}
 
 
 @dataclass(frozen=True)
@@ -21,46 +25,100 @@ class QualityReport:
     duplicate_event_rows: int
     missing_identity_rows: int
     invalid_timestamp_rows: int
-    negative_revenue_rows: int
+    invalid_revenue_rows: int
+    unknown_product_rows: int
+    unknown_event_type_rows: int
+    non_purchase_revenue_rows: int
+    rows_rejected: int
     rows_certified: int
 
 
-def certify_events(events: pd.DataFrame) -> tuple[pd.DataFrame, QualityReport]:
+def _append_reason(reason: pd.Series, mask: pd.Series, label: str) -> pd.Series:
+    prefix = reason.where(reason.eq(""), reason + ";")
+    return reason.where(~mask, prefix + label)
+
+
+def certify_events_with_rejects(
+    events: pd.DataFrame,
+) -> tuple[pd.DataFrame, QualityReport, pd.DataFrame]:
+    """Certify raw events and preserve row-level rejection evidence.
+
+    A row may violate more than one rule. `reject_reason` therefore stores a
+    semicolon-separated list instead of forcing mutually exclusive categories.
+    """
     missing = REQUIRED_COLUMNS.difference(events.columns)
     if missing:
         raise ValueError(f"Missing required columns: {sorted(missing)}")
 
     df = events.copy()
     parsed_ts = pd.to_datetime(df["event_ts"], errors="coerce", utc=True)
+    revenue_numeric = pd.to_numeric(df["revenue_gbp"], errors="coerce")
+
     duplicate = df.duplicated("event_id", keep="first")
     missing_identity = df["user_id"].isna() | df["user_id"].astype("string").str.strip().eq("")
     invalid_ts = parsed_ts.isna()
-    negative_revenue = pd.to_numeric(df["revenue_gbp"], errors="coerce").fillna(-1).lt(0)
+    invalid_revenue = revenue_numeric.isna() | revenue_numeric.lt(0)
+    unknown_product = ~df["product"].isin(ALLOWED_PRODUCTS)
+    unknown_event_type = ~df["event_type"].isin(ALLOWED_EVENT_TYPES)
+    non_purchase_revenue = ~df["event_type"].eq("purchase") & revenue_numeric.fillna(0.0).ne(0.0)
 
-    valid = ~(duplicate | missing_identity | invalid_ts | negative_revenue)
+    reason = pd.Series("", index=df.index, dtype="string")
+    for mask, label in [
+        (duplicate, "duplicate_event_id"),
+        (missing_identity, "missing_identity"),
+        (invalid_ts, "invalid_timestamp"),
+        (invalid_revenue, "invalid_revenue"),
+        (unknown_product, "unknown_product"),
+        (unknown_event_type, "unknown_event_type"),
+        (non_purchase_revenue, "non_purchase_revenue"),
+    ]:
+        reason = _append_reason(reason, mask, label)
+
+    valid = reason.eq("")
     certified = df.loc[valid].copy()
     certified["event_ts"] = parsed_ts.loc[valid]
-    certified["revenue_gbp"] = pd.to_numeric(certified["revenue_gbp"], errors="raise").astype(float)
-    certified = certified.sort_values(["event_ts", "event_id"]).reset_index(drop=True)
+    certified["revenue_gbp"] = revenue_numeric.loc[valid].astype(float)
+    certified = certified.sort_values(["event_ts", "event_id"], kind="stable").reset_index(drop=True)
+
+    rejected = df.loc[~valid].copy()
+    rejected["reject_reason"] = reason.loc[~valid].astype(str)
+    rejected["event_ts_parsed"] = parsed_ts.loc[~valid]
+    rejected["revenue_gbp_parsed"] = revenue_numeric.loc[~valid]
+    rejected = rejected.reset_index(drop=True)
 
     report = QualityReport(
         rows_raw=len(df),
         duplicate_event_rows=int(duplicate.sum()),
         missing_identity_rows=int(missing_identity.sum()),
         invalid_timestamp_rows=int(invalid_ts.sum()),
-        negative_revenue_rows=int(negative_revenue.sum()),
+        invalid_revenue_rows=int(invalid_revenue.sum()),
+        unknown_product_rows=int(unknown_product.sum()),
+        unknown_event_type_rows=int(unknown_event_type.sum()),
+        non_purchase_revenue_rows=int(non_purchase_revenue.sum()),
+        rows_rejected=int((~valid).sum()),
         rows_certified=len(certified),
     )
+    return certified, report, rejected
+
+
+def certify_events(events: pd.DataFrame) -> tuple[pd.DataFrame, QualityReport]:
+    """Backward-compatible two-output certification API."""
+    certified, report, _ = certify_events_with_rejects(events)
     return certified, report
 
 
 def reconcile_revenue(raw: pd.DataFrame, certified: pd.DataFrame) -> pd.DataFrame:
     """Compare raw and certified purchase revenue by product."""
+
     def revenue(frame: pd.DataFrame, label: str) -> pd.Series:
         x = frame.loc[frame["event_type"].eq("purchase")].copy()
-        return x.groupby("product")["revenue_gbp"].sum().rename(label)
+        values = pd.to_numeric(x["revenue_gbp"], errors="coerce").fillna(0.0)
+        return values.groupby(x["product"]).sum().rename(label)
 
-    out = pd.concat([revenue(raw, "raw_revenue_gbp"), revenue(certified, "certified_revenue_gbp")], axis=1).fillna(0.0)
+    out = pd.concat(
+        [revenue(raw, "raw_revenue_gbp"), revenue(certified, "certified_revenue_gbp")],
+        axis=1,
+    ).fillna(0.0)
     out["overstatement_gbp"] = out["raw_revenue_gbp"] - out["certified_revenue_gbp"]
     denominator = out["certified_revenue_gbp"].replace(0, pd.NA)
     out["overstatement_pct"] = 100.0 * out["overstatement_gbp"] / denominator
