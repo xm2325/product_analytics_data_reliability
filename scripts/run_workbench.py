@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from dataclasses import asdict
+from datetime import timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -144,7 +145,11 @@ def main() -> None:
         outputs.append(path)
 
     reporting_date = max(pd.Timestamp(value).date() for value in analysis_as_of_by_product.values())
-    processing_as_of = pd.Timestamp(reporting_date, tz="UTC") + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
+    processing_as_of = (
+        pd.Timestamp(reporting_date, tz="UTC")
+        + timedelta(days=1)
+        - timedelta(microseconds=1)
+    )
     arrival_summary = late_arrival_summary(silver, DEFAULT_LATE_ARRIVAL_POLICY)
     late_finalized_events = late_after_watermark_snapshot(
         silver,
