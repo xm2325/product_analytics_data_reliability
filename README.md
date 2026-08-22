@@ -11,9 +11,29 @@ The repository combines event certification, metric contracts, revenue reconcili
 
 All data and results are synthetic, controlled-fault outputs or explicitly labelled planning stress tests. Nothing in this repository is presented as production-company performance.
 
+## Verified v0.23 reference run
+
+GitHub Actions reproduced and validated the 120-day reference run with `seed=2206`:
+
+| Check | Verified result |
+|---|---:|
+| Raw events | **50,581** |
+| Rejected rows | **589** |
+| Certified rows | **49,992** |
+| Raw revenue overstatement across products | **9.13%–10.96%** |
+| Paid conversion from first-open | **16.17%** |
+| Paid conversion conditional on trial-start | **48.55%** |
+| DAU forecasts approved | **3 / 3** |
+| DAU MAPE | **9.1%–12.5%** |
+| Revenue / paid-subscription forecasts withheld | **6 / 6** |
+| Revenue / paid-subscription MAPE | **25.6%–37.3%** |
+| Portable artifacts covered by SHA-256 manifest | **10** |
+
+The forecast evaluation uses an explicit observation-maturity boundary: delayed trial/subscription/purchase events after the final acquisition day remain in historical metrics, but the artificial post-acquisition tail is excluded from the forecasting holdout. This prevents a simulator stopping boundary from being mistaken for a genuine product collapse.
+
 ## v0.23 at a glance
 
-The current public workflow now treats failed data as evidence rather than silently dropping it:
+The current public workflow treats failed data as evidence rather than silently dropping it:
 
 ```text
 Synthetic events
@@ -45,7 +65,7 @@ The CI pipeline runs unit tests, builds a 120-day deterministic reference datase
 | Data certification | Duplicate IDs, missing identities, invalid timestamps/revenue, unknown products/events and revenue-on-non-purchase rows are rejected with row-level reasons. |
 | Revenue reconciliation | Raw purchase revenue is compared with certified purchase revenue by product; controlled duplicate faults remain observable rather than entering Gold metrics. |
 | Metric semantics | Conversion metrics keep numerator, denominator, grain, unit and version as machine-readable contracts. |
-| Forecast governance | A seasonal-naive rolling evaluation is fitted for DAU, revenue and paid subscriptions per product; forecasts are explicitly approved or withheld by a declared gate. |
+| Forecast governance | A seasonal-naive rolling evaluation is fitted for DAU, revenue and paid subscriptions per product; forecasts are explicitly approved or withheld by a declared gate and mature observation window. |
 | Safe recovery | Backfills use replacement semantics so replaying the same correction is a no-op. |
 | Experiment governance | Revenue evidence and paid-conversion harm clearance are separate, non-compensatory rollout gates. |
 | Evidence integrity | Portable outputs are SHA-256 hashed and independently validated after generation. |
@@ -60,7 +80,7 @@ The CI pipeline runs unit tests, builds a 120-day deterministic reference datase
 │   ├── contracts.py          # machine-readable event contract
 │   ├── quality.py            # certification, rejects and reconciliation
 │   ├── metrics.py            # metric contracts and KPI calculations
-│   ├── forecasting.py        # holdout forecast evaluation and planning gate
+│   ├── forecasting.py        # mature-window forecast evaluation and planning gate
 │   ├── experiments.py        # experiment estimands and non-compensatory guardrails
 │   ├── risk_design.py        # allocation / evidence-planning primitives
 │   ├── provenance.py         # SHA-256 artifact manifest
@@ -70,7 +90,7 @@ The CI pipeline runs unit tests, builds a 120-day deterministic reference datase
 │   ├── run_workbench.py
 │   └── validate_build.py
 ├── tests/
-├── results/                  # compact preserved reference/planning snapshots
+├── results/                  # current pinned summary + preserved planning snapshot
 ├── docs/
 │   ├── METRIC_CONTRACTS.md
 │   ├── RESULTS.md
@@ -119,7 +139,7 @@ paid_conversion_from_first_open
 paid_conversion_from_trial_start
 ```
 
-Both may be correct because they answer different denominator questions. The contract stores numerator, denominator, grain, unit and version rather than relying on a dashboard label.
+The verified reference values are 16.17% and 48.55% respectively. Both are correct because they answer different denominator questions. The contract stores numerator, denominator, grain, unit and version rather than relying on a dashboard label.
 
 ## Forecast gate
 
@@ -129,7 +149,9 @@ For each product, the workflow evaluates:
 - revenue;
 - paid subscriptions.
 
-The current compact implementation uses a seven-day seasonal-naive baseline over a 28-point rolling holdout. A forecast is withheld if there are too few holdout points, MAPE is not estimable, or MAPE exceeds the declared threshold.
+The compact implementation uses a seven-day seasonal-naive baseline over a 28-point holdout. Before the holdout is formed, `mature_metric_history` trims dates after the final `first_open` acquisition boundary so delayed outcomes do not create an artificial low-volume tail.
+
+A forecast is withheld if there are too few holdout points, MAPE is not estimable, or MAPE exceeds the declared 20% threshold. In the verified reference run, all three DAU baselines pass at 9.1%–12.5% MAPE, while all six revenue/subscription baselines are withheld at 25.6%–37.3% MAPE.
 
 The distinction is deliberate:
 
