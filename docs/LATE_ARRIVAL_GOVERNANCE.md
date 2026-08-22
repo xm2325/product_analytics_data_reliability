@@ -1,6 +1,6 @@
 # Late-arrival and watermark governance
 
-v0.26 separates **event time** from **processing time** so a KPI can be evaluated using only data that had actually reached the platform at a reporting snapshot. v0.27 keeps this audit layer and adds a separate SLA-calibration decision on top of it.
+v0.26 separates **event time** from **processing time** so a KPI can be evaluated using only data that had actually reached the platform at a reporting snapshot. v0.27 added point-in-time SLA calibration; v0.28 keeps the audit layer separate and adds a rolling stability decision on top.
 
 ## Contract
 
@@ -25,11 +25,11 @@ watermark_event_date   = 2026-04-28
 
 An event date on or before the watermark is **nominally final**. A later date is **provisional**.
 
-This is an operating contract, not a guarantee that no older event will ever arrive. A row arriving after nominal finalization is an exception that must be reconciled and backfilled rather than ignored.
+This audit setting is not the same thing as the current stable operating recommendation. It is retained so the row-level v0.26 exception evidence remains reproducible.
 
 ## Reference evidence
 
-The deterministic 120-day run contains 275,660 certified events. Of these, 1,367 arrive more than 48 hours after event time, or about **0.496%**.
+The deterministic 120-day run contains 275,660 certified events. Of these, 1,367 arrive more than 48 hours after event time, or about **0.496%** of the full settled stream.
 
 At the declared processing snapshot, **24 events** for dates already behind the 48-hour watermark had not yet arrived. Settling those rows later changes **8 product-date-metric cells**:
 
@@ -72,15 +72,23 @@ late event detected
       -> record KPI revision
 ```
 
-## v0.27: from audit policy to calibrated reference SLA
+## v0.28: audit, local calibration and stable SLA are separate layers
 
-v0.26 deliberately did **not** claim that 48 hours was optimal. v0.27 closes that declared limitation by replaying 24/48/72/96-hour candidates against the same processing snapshot and applying four explicit hard constraints.
+The repository now exposes three distinct freshness concepts:
 
-The verified reference outcome is:
+```text
+48h audit policy
+    = retained row-level exception/backfill reference
 
-- 24h is infeasible because late-event and revised-KPI-cell fractions both breach budget;
-- 48h satisfies all constraints;
-- 72h and 96h also satisfy them but delay finalization by one and two additional days;
-- the selection rule therefore chooses 48h as the **shortest feasible** candidate.
+48h Apr-30 point-in-time selection
+    = shortest candidate satisfying all hard constraints at that snapshot
 
-The calibration still does not establish a universal production SLA: the delay model and tolerance budget are synthetic/reference assumptions, and the current calibration uses one reporting snapshot. See [`WATERMARK_CALIBRATION.md`](WATERMARK_CALIBRATION.md) for the full candidate table, risk budget, CI regression contract and limitations.
+96h rolling stable selection
+    = shortest candidate satisfying the same hard constraints in all 9 backtest windows
+```
+
+The v0.28 decision denominator is also stricter than the original audit summary: only events whose `event_date` is on or before a candidate watermark enter that candidate's SLA late-event fraction. Future/provisional event dates do not participate in the current decision.
+
+Across nine weekly snapshots, 48h is feasible in 5/9 windows, 72h in 8/9, and 96h in 9/9. The budget is not relaxed after observing the backtest, so the current synthetic-reference stable SLA is **96 hours**.
+
+This still does not establish a universal production SLA. The delay process and thresholds are synthetic, and observed 9/9 feasibility is not yet a statistical confidence statement. See [`WATERMARK_CALIBRATION.md`](WATERMARK_CALIBRATION.md) and [`WATERMARK_STABILITY.md`](WATERMARK_STABILITY.md).

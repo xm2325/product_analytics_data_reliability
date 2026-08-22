@@ -1,21 +1,24 @@
 # Product Analytics & Data Reliability Workbench
 
-**Version:** v0.27  
+**Version:** v0.28  
 **Stack:** Python · DuckDB · SQL · Pandas · NumPy · SciPy · Statsmodels · Pytest · GitHub Actions
 
 A reproducible analytics workbench for a synthetic portfolio of subscription products. It is organised around one practical question:
 
 > When a product KPI moves, can the team trust the number, explain the movement, and make a defensible decision using only evidence actually available at the reporting time?
 
-The repository combines event certification, metric contracts, revenue reconciliation, point-in-time retention, forecast gates, experiment guardrails, processing-time freshness, watermark calibration and evidence provenance in one auditable workflow.
+The repository combines event certification, metric contracts, revenue reconciliation, point-in-time retention, forecast gates, experiment guardrails, processing-time freshness, watermark calibration, rolling SLA backtesting and evidence provenance in one auditable workflow.
 
 All data and results are synthetic, controlled-fault outputs or explicitly labelled planning stress tests. Nothing here is presented as production-company performance.
 
-## Verified v0.27 reference run
+## Verified v0.28 reference design
 
-The 120-day deterministic reference uses `seed=2206`. GitHub Actions has reproduced the pipeline, generic build validator and pinned-reference claim validator.
+The deterministic reference uses `seed=2206`, `days=120`. v0.28 preserves the commercial, DAU and mature-retention truth of the prior releases, but tightens the freshness decision in two ways:
 
-| Check | Verified result |
+1. the late-event decision denominator is now point-in-time and candidate-specific: only events whose event date is on or before that candidate's watermark enter the SLA risk fraction;
+2. the same 24/48/72/96-hour policy grid is replayed across nine weekly processing snapshots rather than trusted from one final snapshot.
+
+| Check | Reference result |
 |---|---:|
 | Raw events | **276,249** |
 | Rejected / certified rows | **589 / 275,660** |
@@ -23,78 +26,134 @@ The 120-day deterministic reference uses `seed=2206`. GitHub Actions has reprodu
 | Paid / first-open | **16.17%** |
 | Paid / trial-start | **48.55%** |
 | DAU forecasts approved | **3 / 3** |
-| DAU MAPE | **3.9%–5.9%** |
 | Revenue / subscription forecasts withheld | **6 / 6** |
-| Revenue / subscription MAPE | **25.6%–37.3%** |
-| Unit + Python/SQL parity/calibration tests | **38 passed** |
-| Portable artifacts in SHA-256 manifest | **25** |
+| Unit + parity/calibration/backtest tests | **41 passed** in first v0.28 CI build |
+| Portable artifacts in SHA-256 manifest | **29** |
 
-Commercial, DAU and mature-retention truth remains numerically stable from v0.25. v0.26 added processing time without redrawing behaviour; v0.27 reuses that same evidence to choose a reference finalization SLA.
+The first v0.28 CI build passed the unit suite, 120-day reference build and generic build validator. It intentionally failed the old v0.27 pinned-claim gate because that gate still required the old reference version/summary field; the gate has now been rewritten for v0.28 and is revalidated on the final branch head before merge.
 
-## v0.27: why is the watermark 48 hours?
+## v0.28: one snapshot is not enough to certify an SLA
 
-v0.26 deliberately treated 48 hours as a reference policy rather than claiming it was optimal. v0.27 makes the choice auditable.
+v0.27 asked which watermark was shortest while satisfying four independent risk constraints at the 2026-04-30 processing snapshot. v0.28 keeps those exact thresholds and asks a harder question:
 
-Four candidate finalization lags are replayed against the **same certified event stream** and the **same 2026-04-30 processing snapshot**:
+> Does the same candidate remain feasible when the reporting snapshot moves through time?
 
-```text
-24h · 48h · 72h · 96h
-```
-
-The reference risk budget is expressed as four hard constraints:
+The hard risk budget is unchanged:
 
 ```text
-late-event fraction                  <= 0.50%
-revised finalized KPI-cell fraction  <= 1.00%
-max |single revenue revision|         <= £10
-max |paid-subscription revision|      <= 1
+late-event fraction among finalizable events <= 0.50%
+revised finalized KPI-cell fraction          <= 1.00%
+max |single revenue revision|                 <= £10
+max |paid-subscription revision|              <= 1
 ```
 
-There is **no weighted score**. Revenue revision, event lateness and KPI revision rate stay in their natural units and cannot compensate for one another.
+There is no weighted score and the budget is not relaxed after seeing the backtest.
 
-### Candidate replay
+### Point-in-time denominator correction
 
-| Candidate | Finalization lag | Late-event fraction | Missing after nominal finalization | Revised KPI cells | Revised-cell fraction | Max revenue revision | Max paid revision | Feasible? |
-|---|---:|---:|---:|---:|---:|---:|---:|---|
-| 24h | 1 day | **6.958%** | 62 | 13 / 1,071 | **1.214%** | £9.99 | 1 | **No** |
-| 48h | 2 days | **0.496%** | 24 | 8 / 1,062 | **0.753%** | £7.99 | 1 | **Yes** |
-| 72h | 3 days | **0.496%** | 11 | 4 / 1,053 | **0.380%** | £0.00 | 1 | **Yes** |
-| 96h | 4 days | **0.482%** | 0 | 0 / 1,044 | **0.000%** | £0.00 | 0 | **Yes** |
+For each candidate and processing snapshot:
 
-The decision rule is therefore:
+```text
+candidate watermark date
+        |
+        v
+historical events with event_date <= watermark
+        |
+        +--> finalizable_events
+        |
+        `--> late-event fraction used by SLA decision
+```
+
+Events occurring after that candidate's watermark no longer inflate or dilute the decision denominator. The whole settled-stream late rate is still emitted as a diagnostic column, but it is not the policy constraint.
+
+At the 2026-04-30 snapshot, this correction does **not** change the local choice:
+
+| Candidate | Finalizable events | Point-in-time late fraction | Revised-cell fraction | Max revenue revision | Feasible? |
+|---|---:|---:|---:|---:|---|
+| 24h | 251,928 | **6.932%** | **1.214%** | £9.99 | No |
+| 48h | 249,634 | **0.4951%** | **0.753%** | £7.99 | Yes |
+| 72h | 247,364 | **0.4944%** | **0.380%** | £0.00 | Yes |
+| 96h | 245,130 | **0.4814%** | **0.000%** | £0.00 | Yes |
+
+So the single-snapshot rule still selects **48h** as the shortest feasible candidate.
+
+## Rolling watermark backtest
+
+v0.28 then evaluates the same four candidates at nine weekly processing snapshots from 2026-03-05 through 2026-04-30. Each window independently selects its shortest feasible candidate under the unchanged budget.
+
+The observed per-window shortest choices are:
+
+```text
+72h, 72h, 72h, 96h, 48h, 48h, 48h, 48h, 48h
+```
+
+Aggregate stability is materially different from the single-snapshot view:
+
+| Candidate | Feasible windows | Feasibility rate | Worst revised-cell fraction | Worst revenue revision | Stable in all windows? |
+|---|---:|---:|---:|---:|---|
+| 24h | 0 / 9 | 0.0% | 1.940% | £23.98 | No |
+| 48h | 5 / 9 | 55.6% | **1.288%** | **£11.99** | No |
+| 72h | 8 / 9 | 88.9% | 0.741% | **£11.99** | No |
+| 96h | **9 / 9** | **100%** | 0.300% | £0.00 | **Yes** |
+
+The stability decision is therefore:
 
 ```text
 minimize finalization lag
-subject to every risk constraint passing
+subject to the original hard budget passing in every backtest window
+
+selected stable SLA = 96h
+budget relaxed after backtest = false
+weighted score used = false
 ```
 
-The 24-hour candidate fails both the late-event-fraction and revised-KPI-cell-fraction gates. **48 hours is the shortest feasible candidate.** The 72/96-hour policies reduce revision risk further, but cost one or two extra days of freshness, so they do not win simply because their risk is lower.
+This deliberately produces a less fresh but more defensible policy than the final-snapshot result. v0.28 does **not** change the rule to 8/9 windows to preserve a 72-hour answer, and it does not raise the £10 revenue-revision threshold after observing a £11.99 breach.
 
-Generated decision evidence:
+Generated evidence:
 
 ```text
 watermark_policy_grid.csv
 watermark_policy_decision.json
+watermark_rolling_grid.csv
+watermark_rolling_windows.csv
+watermark_stability_summary.csv
+watermark_stability_decision.json
 ```
 
-See [`docs/WATERMARK_CALIBRATION.md`](docs/WATERMARK_CALIBRATION.md).
+See [`docs/WATERMARK_CALIBRATION.md`](docs/WATERMARK_CALIBRATION.md) and [`docs/WATERMARK_STABILITY.md`](docs/WATERMARK_STABILITY.md).
+
+## Why both 48h and 96h appear in the repository
+
+They answer different operating questions:
+
+```text
+48h = shortest candidate feasible at the 2026-04-30 snapshot
+96h = shortest candidate feasible in every declared rolling backtest window
+```
+
+A snapshot-local decision should not be relabelled as a stable SLA. The rolling policy is the stronger current operating recommendation for this synthetic reference, while the 48-hour row remains useful evidence of why a single end-of-study snapshot can be overconfident.
 
 ## Reference-claim drift is a CI failure
 
-The generic validator checks invariants such as candidate monotonicity, constraint accounting and “shortest feasible” selection. v0.27 adds a second deterministic-reference gate because published results can otherwise become stale while code continues to pass generic tests.
-
-For the pinned `seed=2206`, `days=120` reference:
+The validation layers are separated intentionally:
 
 ```text
-24h must remain infeasible
-24h must fail late-event and revised-cell fraction gates
-48h must remain feasible
-selected SLA must remain 48h
+pytest
+  -> implementation behaviour
+
+validate_build.py
+  -> generic artifact/data invariants
+
+validate_watermark_backtest.py
+  -> calibration and rolling-selection accounting
+
+validate_reference_claims.py
+  -> pinned seed=2206, days=120 public claims
 ```
 
-If later code, metric semantics or synthetic data moves that boundary, CI fails and forces the public claim to be reviewed.
+The pinned v0.28 claim gate checks that the single 2026-04-30 snapshot still selects 48h while the rolling stability decision selects 96h with candidate feasibility counts `0/9, 5/9, 8/9, 9/9`. If future code or synthetic data moves those claims, CI must fail until the public evidence is reviewed.
 
-## v0.26: event time is not processing time
+## v0.26 foundation: event time is not processing time
 
 A trustworthy metric system distinguishes when an event happened from when the analytics platform received it:
 
@@ -103,79 +162,15 @@ event_ts     = business/event time
 ingested_at  = processing time
 ```
 
-The generator uses a dedicated ingestion RNG, separate from commercial and activity randomness. Adding lateness therefore does not silently change acquisition, trial, purchase or app-open truth.
+The generator uses a dedicated ingestion RNG, separate from commercial and activity randomness. Generated events include `ingested_at`; legacy inputs without it are interpreted as immediate arrivals. Explicit processing timestamps that are invalid or earlier than event time are rejected.
 
-Generated events include `ingested_at`; legacy inputs without that column remain supported and are interpreted as immediate arrivals (`ingested_at = event_ts`). Explicit processing timestamps that are invalid or earlier than event time are rejected.
-
-Under the selected 48-hour reference policy, 1,367 of 275,660 certified rows arrive beyond the watermark (**0.496%**). At the processing snapshot, **24 events** for nominally-final dates had not yet arrived. Settling them changes **8 product-date-metric cells**:
-
-| Product | Metric | Finalized cells revised | Total revision | Largest single revision |
-|---|---|---:|---:|---:|
-| File Transfer | DAU | 2 | +2 users | +1 user |
-| Notes App | DAU | 2 | +8 users | +4 users |
-| Notes App | Revenue | 1 | +£7.99 | +£7.99 |
-| Photo Editor | DAU | 2 | +7 users | +4 users |
-| Photo Editor | Paid subscriptions | 1 | +1 | +1 |
-
-A late row is not automatically a KPI revision: distinct-user semantics and event type determine whether the aggregate changes.
-
-### Late-arrival operating path
-
-```text
-event_ts
-   |
-   v
-ingested_at
-   |
-   v
-processing delay
-   |
-   v
-watermark
-   |-----------------------|
-   v                       v
-provisional dates     nominally final dates
-                           |
-                           v
-                  late-arrival exception
-                           |
-                           v
-                     reconciliation
-                           |
-                           v
-                idempotent keyed backfill
-                           |
-                           v
-                 KPI revision evidence
-```
-
-Late events are never silently discarded because a date was previously called final. The build preserves both row-level exceptions and metric-level revisions:
-
-```text
-late_arrival_contract.json
-late_arrival_summary.csv
-watermark_late_events.csv
-watermark_metric_revisions.csv
-watermark_revision_summary.csv
-```
+Under the 48-hour audit view at the Apr-30 snapshot, 24 events for nominally-final dates had not yet arrived and later settlement changes eight product-date-metric cells. Late events are reconciled through an idempotent keyed backfill rather than silently discarded.
 
 See [`docs/LATE_ARRIVAL_GOVERNANCE.md`](docs/LATE_ARRIVAL_GOVERNANCE.md).
 
-## v0.25: retention maturity remains point-in-time
+## Point-in-time retention remains explicit
 
-A source table may contain follow-up events after the date of a report. Those future outcomes must not enter a recent cohort's retention denominator.
-
-The reference declares:
-
-```text
-analysis_as_of = final first_open date in reporting window
-               = 2026-04-30
-
-target_date = cohort_date + horizon
-mature      = target_date <= analysis_as_of
-```
-
-Only mature cohorts enter D7/D30 retention. Immature cohorts remain visible with `eligible_users=0`, explicit exclusions and null outcomes.
+Retention uses a declared `analysis_as_of` boundary. Only cohorts whose D7/D30 target date has matured enter the denominator; later cohorts remain visible as exclusions rather than being treated as churn.
 
 | Product | Horizon | Eligible users | Excluded users | Eligible fraction | Retention among eligible |
 |---|---:|---:|---:|---:|---:|
@@ -185,8 +180,6 @@ Only mature cohorts enter D7/D30 retention. Immature cohorts remain visible with
 | Notes App | D30 | 6,947 | 2,221 | **75.77%** | **21.88%** |
 | Photo Editor | D7 | 10,352 | 637 | **94.20%** | **26.82%** |
 | Photo Editor | D30 | 8,199 | 2,790 | **74.61%** | **11.20%** |
-
-Every product has 120 acquisition cohorts. D7 has 113 mature / 7 immature cohorts; D30 has 90 mature / 30 immature cohorts.
 
 **Lower D30 eligibility is evidence maturity, not worse retention.**
 
@@ -199,7 +192,20 @@ DAU v1 (deprecated) = unique users with any certified event
 DAU v2              = unique users with app_open
 ```
 
-Both definitions run on the same certified stream. The verified legacy overstatement is **5.27%** for File Transfer, **2.21%** for Notes App and **4.35%** for Photo Editor.
+The verified legacy overstatement remains **5.27%** for File Transfer, **2.21%** for Notes App and **4.35%** for Photo Editor.
+
+## Forecast governance
+
+For each product, the workflow evaluates DAU, revenue and paid subscriptions with a seven-day seasonal-naive baseline over a 28-point holdout. The final-`first_open` event-time boundary prevents simulator follow-up from leaking into forecast history.
+
+In the reference run:
+
+- all three DAU baselines pass at **3.9%–5.9% MAPE**;
+- all six revenue/subscription baselines are withheld at **25.6%–37.3% MAPE** under the unchanged 20% gate.
+
+```text
+model executed successfully != forecast approved for planning
+```
 
 ## Data reliability flow
 
@@ -216,7 +222,8 @@ Bronze raw events
 Silver certified events
       |
       +----> processing latency / watermark evidence
-      +----> watermark policy calibration
+      +----> point-in-time candidate calibration
+      +----> rolling watermark backtest
       +----> revenue reconciliation
       |
       v
@@ -225,39 +232,14 @@ Gold daily metrics
       +----> DAU v1/v2 migration
       +----> forecast evaluation
       +----> retention maturity ledger
-      |          |---- mature ----> D7/D30 retention
-      |          `---- immature --> explicit exclusion
       |
-      +----> event / metric / retention / freshness contracts
+      +----> contracts + validators
       `----> SHA-256 manifest
 ```
-
-Certification rejects duplicate IDs, missing identities, invalid event or ingestion timestamps, processing-before-event chronology, invalid revenue, unknown products/events and non-zero revenue on non-purchase events. Rejected rows remain inspectable with `reject_reason`.
 
 ## Python / DuckDB SQL parity
 
 The `sql/` directory is tested code rather than illustrative syntax. CI independently executes and compares SQL with Python for Silver certification, Gold daily metrics, retention maturity and processing-latency summaries.
-
-The retention comparison covers target date, `analysis_as_of`, maturity status, eligible/excluded users, retained users, rate and exclusion reason. The freshness comparison verifies processing delay and late-watermark counts by product and event type.
-
-## Forecast governance
-
-For each product, the workflow evaluates DAU, revenue and paid subscriptions with a seven-day seasonal-naive baseline over a 28-point holdout. The final-`first_open` event-time boundary prevents simulator follow-up from leaking into forecast history.
-
-In the verified run:
-
-- all three DAU baselines pass at **3.9%–5.9% MAPE**;
-- all six revenue/subscription baselines are withheld at **25.6%–37.3% MAPE** under the unchanged 20% gate.
-
-```text
-model executed successfully != forecast approved for planning
-```
-
-## Metric and decision contracts
-
-Metric definitions store numerator, denominator, grain, unit and version. Retention contracts additionally store cohort event, return event, horizon and exact-calendar-day return window. Freshness contracts store event/processing-time fields, allowed lateness, snapshot and backfill action. The watermark decision contract stores the candidate grid, hard budget, selection rule and chosen row.
-
-Pricing decisions elsewhere in the workbench keep commercial evidence and customer-safety evidence separate. Revenue upside cannot mathematically compensate for a harmful customer state.
 
 ## Repository structure
 
@@ -276,13 +258,10 @@ Pricing decisions elsewhere in the workbench keep commercial evidence and custom
 │   ├── provenance.py
 │   └── pipeline.py
 ├── sql/
-│   ├── silver_events.sql
-│   ├── gold_daily_metrics.sql
-│   ├── activity_retention_maturity.sql
-│   └── late_arrival_summary.sql
 ├── scripts/
 │   ├── run_workbench.py
 │   ├── validate_build.py
+│   ├── validate_watermark_backtest.py
 │   └── validate_reference_claims.py
 ├── tests/
 ├── results/
@@ -300,22 +279,19 @@ pip install -e .
 
 python scripts/run_workbench.py --output-dir build/reference
 python scripts/validate_build.py build/reference
+python scripts/validate_watermark_backtest.py build/reference
 python scripts/validate_reference_claims.py build/reference
 pytest -q
 ```
 
-Or run the existing local gate:
+Or run the complete local gate:
 
 ```bash
 make check
 ```
 
-## Generated reference evidence
-
-The current build contains **25 portable CSV/JSON artifacts** hashed by `MANIFEST.json`, including the two v0.27 calibration artifacts. The GitHub Actions workflow artifact additionally includes `workbench.duckdb`.
-
 ## Reproducibility boundary
 
-Current numerical claims must either be regenerated by the present workflow and checked in CI or explicitly labelled as preserved historical context. `results/risk_aware_design.csv` remains a preserved pre-v0.23 planning snapshot; it is not presented as a current regression target or production recommendation.
+Current numerical claims must either be regenerated by the present workflow and checked in CI or explicitly labelled as preserved historical context. The ingestion-delay distribution and risk budgets are synthetic/demo assumptions, not estimates of any real company's infrastructure. `results/risk_aware_design.csv` remains preserved historical planning context rather than a current production recommendation.
 
-See [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md), [`docs/LATE_ARRIVAL_GOVERNANCE.md`](docs/LATE_ARRIVAL_GOVERNANCE.md) and [`docs/WATERMARK_CALIBRATION.md`](docs/WATERMARK_CALIBRATION.md).
+See [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md), [`docs/LATE_ARRIVAL_GOVERNANCE.md`](docs/LATE_ARRIVAL_GOVERNANCE.md), [`docs/WATERMARK_CALIBRATION.md`](docs/WATERMARK_CALIBRATION.md) and [`docs/WATERMARK_STABILITY.md`](docs/WATERMARK_STABILITY.md).

@@ -20,8 +20,11 @@ from product_analytics.freshness import (
     late_arrival_summary,
     metric_revision_report,
     revision_summary,
+    rolling_watermark_backtest,
+    select_stable_watermark_policy,
     select_watermark_policy,
     watermark_policy_grid,
+    watermark_stability_summary,
 )
 from product_analytics.generator import generate_events, product_config_frame
 from product_analytics.metrics import (
@@ -38,7 +41,7 @@ from product_analytics.pipeline import run_pipeline
 from product_analytics.provenance import write_manifest
 
 
-VERSION = "0.27.0"
+VERSION = "0.28.0"
 
 
 def _write_json(path: Path, payload: object) -> None:
@@ -68,8 +71,8 @@ def main() -> None:
     parser.add_argument("--days", type=int, default=120)
     parser.add_argument("--seed", type=int, default=2206)
     args = parser.parse_args()
-    if args.days < 40:
-        raise SystemExit("--days must be at least 40 so the 28-day forecast holdout is estimable")
+    if args.days < 70:
+        raise SystemExit("--days must be at least 70 so forecast and rolling freshness backtests are estimable")
 
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -152,7 +155,7 @@ def main() -> None:
         - timedelta(microseconds=1)
     )
 
-    # v0.26 reference policy evidence remains available for row-level audit.
+    # Row-level 48h audit remains available independently of policy selection.
     arrival_summary = late_arrival_summary(silver, DEFAULT_LATE_ARRIVAL_POLICY)
     late_finalized_events = late_after_watermark_snapshot(
         silver,
@@ -175,9 +178,9 @@ def main() -> None:
         frame.to_csv(path, index=False)
         outputs.append(path)
 
-    # v0.27 replays several candidate finalization delays against the same
-    # event stream/snapshot and selects the shortest candidate satisfying every
-    # declared risk constraint. No weighted score is used.
+    # v0.28 corrects the decision denominator: candidate late-event fractions
+    # use only event dates already on/before that candidate watermark. A whole-
+    # stream late fraction remains in the grid as a non-decision diagnostic.
     policy_grid = watermark_policy_grid(
         silver,
         processing_as_of,
@@ -191,6 +194,33 @@ def main() -> None:
     policy_decision_path = out / "watermark_policy_decision.json"
     _write_json(policy_decision_path, policy_decision)
     outputs.append(policy_decision_path)
+
+    # Nine weekly snapshots ending at the current reporting snapshot. The same
+    # candidate set and risk budget is used in every window; the budget is never
+    # relaxed after observing instability.
+    rolling_snapshots = [
+        processing_as_of - timedelta(days=7 * weeks_back)
+        for weeks_back in range(8, -1, -1)
+    ]
+    rolling_grid, rolling_windows = rolling_watermark_backtest(
+        silver,
+        processing_snapshots=rolling_snapshots,
+        candidate_hours=DEFAULT_WATERMARK_CANDIDATES,
+        budget=DEFAULT_WATERMARK_RISK_BUDGET,
+    )
+    stability = watermark_stability_summary(rolling_grid)
+    stable_decision = select_stable_watermark_policy(stability, DEFAULT_WATERMARK_RISK_BUDGET)
+    for name, frame in {
+        "watermark_rolling_grid.csv": rolling_grid,
+        "watermark_rolling_windows.csv": rolling_windows,
+        "watermark_stability_summary.csv": stability,
+    }.items():
+        path = out / name
+        frame.to_csv(path, index=False)
+        outputs.append(path)
+    stable_decision_path = out / "watermark_stability_decision.json"
+    _write_json(stable_decision_path, stable_decision)
+    outputs.append(stable_decision_path)
 
     quality = asdict(result["quality_report"])
     quality_path = out / "quality_report.json"
@@ -216,6 +246,8 @@ def main() -> None:
 
     maturity_summary_json = maturity_summary.copy()
     maturity_summary_json["analysis_as_of"] = maturity_summary_json["analysis_as_of"].astype(str)
+    rolling_windows_json = rolling_windows.copy()
+    rolling_windows_json["processing_as_of"] = rolling_windows_json["processing_as_of"].astype(str)
     summary = {
         "version": VERSION,
         "seed": args.seed,
@@ -240,8 +272,11 @@ def main() -> None:
             "late_missing_from_finalized_snapshot": int(len(late_finalized_events)),
             "revised_finalized_metric_cells": int(revisions["changed_after_watermark"].sum()),
             "revision_summary": revision_overall.to_dict(orient="records"),
-            "watermark_calibration": policy_decision,
+            "point_in_time_watermark_calibration": policy_decision,
             "watermark_policy_grid": policy_grid.to_dict(orient="records"),
+            "rolling_backtest_windows": rolling_windows_json.to_dict(orient="records"),
+            "watermark_stability_summary": stability.to_dict(orient="records"),
+            "watermark_stability_decision": stable_decision,
         },
         "revenue_reconciliation": reconciliation.to_dict(orient="records"),
     }

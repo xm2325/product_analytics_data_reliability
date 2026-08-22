@@ -20,9 +20,8 @@ class LateArrivalPolicy:
 class WatermarkRiskBudget:
     """Hard constraints for selecting the shortest acceptable watermark.
 
-    The fields intentionally remain in their natural units. There is no
-    weighted score that can trade a large revenue revision against a smaller
-    late-event rate or vice versa.
+    Each constraint stays in its natural unit. No weighted score can trade a
+    revenue revision against event lateness or KPI revision incidence.
     """
 
     max_late_event_fraction: float = 0.005
@@ -188,11 +187,15 @@ def watermark_policy_grid(
     candidate_hours: Iterable[float] = DEFAULT_WATERMARK_CANDIDATES,
     budget: WatermarkRiskBudget = DEFAULT_WATERMARK_RISK_BUDGET,
 ) -> pd.DataFrame:
-    """Evaluate watermark latency versus exception/revision risk.
+    """Replay candidate watermarks with point-in-time decision denominators.
 
-    Every candidate is replayed against the same certified event stream and
-    processing-time snapshot. The table keeps each risk constraint separate so
-    policy choice remains inspectable rather than hidden inside a score.
+    v0.28 tightens the v0.27 scope: the late-event fraction used for the
+    decision is calculated only over events whose *event date* is on or before
+    that candidate's watermark date. Events that occur after the reporting
+    snapshot can no longer influence the candidate's decision denominator.
+
+    `whole_stream_late_event_fraction` is retained as a diagnostic describing
+    the eventual settled stream, but it is not used by the feasibility gate.
     """
     frame = _processing_frame(events)
     if frame.empty:
@@ -206,14 +209,22 @@ def watermark_policy_grid(
     for hours in candidates:
         policy = LateArrivalPolicy(allowed_lateness_hours=hours)
         lateness = with_lateness(frame, policy)
+        watermark_date = watermark_event_date(processing_as_of, policy)
+        event_date = lateness["event_ts"].dt.date
+        finalizable = lateness.loc[event_date.le(watermark_date)].copy()
+        if finalizable.empty:
+            raise ValueError("processing snapshot is too early for the candidate grid")
+
         late_snapshot = late_after_watermark_snapshot(frame, processing_as_of, policy)
         revisions = metric_revision_report(frame, processing_as_of, policy)
 
-        late_events = int(lateness["late_beyond_watermark"].sum())
+        late_events = int(finalizable["late_beyond_watermark"].sum())
+        late_fraction = late_events / len(finalizable)
+        whole_stream_late_events = int(lateness["late_beyond_watermark"].sum())
+        whole_stream_late_fraction = whole_stream_late_events / len(lateness)
         revised_cells = int(revisions["changed_after_watermark"].sum())
         finalized_metric_cells = int(len(revisions))
         finalized_calendar_dates = int(pd.Series(revisions["date"]).nunique()) if finalized_metric_cells else 0
-        late_fraction = late_events / len(frame)
         revised_fraction = revised_cells / finalized_metric_cells if finalized_metric_cells else 0.0
         max_revenue = _metric_max_abs_revision(revisions, "revenue_gbp")
         max_paid = _metric_max_abs_revision(revisions, "paid_subscription")
@@ -227,10 +238,13 @@ def watermark_policy_grid(
             {
                 "allowed_lateness_hours": hours,
                 "finalization_lag_days": hours / 24.0,
-                "watermark_event_date": str(watermark_event_date(processing_as_of, policy)),
-                "certified_events": int(len(frame)),
+                "watermark_event_date": str(watermark_date),
+                "settled_stream_events": int(len(frame)),
+                "finalizable_events": int(len(finalizable)),
                 "late_beyond_watermark_events": late_events,
                 "late_event_fraction": float(late_fraction),
+                "whole_stream_late_beyond_watermark_events": whole_stream_late_events,
+                "whole_stream_late_event_fraction": float(whole_stream_late_fraction),
                 "late_missing_from_finalized_snapshot": int(len(late_snapshot)),
                 "finalized_calendar_dates": finalized_calendar_dates,
                 "finalized_metric_cells": finalized_metric_cells,
@@ -274,9 +288,10 @@ def select_watermark_policy(
     feasible = policy_grid.loc[policy_grid["feasible"].astype(bool)].sort_values("allowed_lateness_hours")
     selected = None if feasible.empty else feasible.iloc[0]
     return {
-        "version": "1.0",
+        "version": "1.1",
         "selection_rule": "shortest candidate satisfying every hard risk constraint",
         "weighted_score_used": False,
+        "late_event_fraction_scope": "event_date_on_or_before_candidate_watermark",
         "budget": asdict(budget),
         "candidate_hours": [float(x) for x in sorted(policy_grid["allowed_lateness_hours"].unique())],
         "status": "selected" if selected is not None else "no_candidate_meets_budget",
@@ -285,11 +300,119 @@ def select_watermark_policy(
         "selected_evidence": None
         if selected is None
         else {
+            "finalizable_events": int(selected["finalizable_events"]),
             "late_event_fraction": float(selected["late_event_fraction"]),
             "revised_metric_cell_fraction": float(selected["revised_metric_cell_fraction"]),
             "max_abs_revenue_revision_gbp": float(selected["max_abs_revenue_revision_gbp"]),
             "max_abs_paid_subscription_revision": float(selected["max_abs_paid_subscription_revision"]),
         },
+    }
+
+
+def rolling_watermark_backtest(
+    events: pd.DataFrame,
+    processing_snapshots: Iterable[object],
+    candidate_hours: Iterable[float] = DEFAULT_WATERMARK_CANDIDATES,
+    budget: WatermarkRiskBudget = DEFAULT_WATERMARK_RISK_BUDGET,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Replay the watermark decision across historical processing snapshots."""
+    snapshots = sorted({_utc_timestamp(value) for value in processing_snapshots})
+    if not snapshots:
+        raise ValueError("processing_snapshots must be non-empty")
+
+    grids: list[pd.DataFrame] = []
+    decisions: list[dict[str, object]] = []
+    for window_index, snapshot in enumerate(snapshots, start=1):
+        grid = watermark_policy_grid(
+            events,
+            processing_as_of=snapshot,
+            candidate_hours=candidate_hours,
+            budget=budget,
+        ).copy()
+        decision = select_watermark_policy(grid, budget)
+        grid.insert(0, "window_index", window_index)
+        grid.insert(1, "processing_as_of", snapshot)
+        grid["selected_in_window"] = grid["allowed_lateness_hours"].eq(
+            decision["selected_lateness_hours"]
+        ) if decision["selected_lateness_hours"] is not None else False
+        grids.append(grid)
+        decisions.append(
+            {
+                "window_index": window_index,
+                "processing_as_of": snapshot,
+                "status": decision["status"],
+                "selected_lateness_hours": decision["selected_lateness_hours"],
+                "selected_watermark_event_date": decision["selected_watermark_event_date"],
+            }
+        )
+
+    return (
+        pd.concat(grids, ignore_index=True),
+        pd.DataFrame(decisions),
+    )
+
+
+def watermark_stability_summary(backtest_grid: pd.DataFrame) -> pd.DataFrame:
+    """Summarise candidate feasibility across rolling snapshots."""
+    required = {
+        "window_index", "allowed_lateness_hours", "feasible", "selected_in_window",
+        "late_event_fraction", "revised_metric_cell_fraction",
+        "max_abs_revenue_revision_gbp", "max_abs_paid_subscription_revision",
+    }
+    missing = required.difference(backtest_grid.columns)
+    if missing:
+        raise ValueError(f"backtest_grid missing columns: {sorted(missing)}")
+
+    frame = backtest_grid.copy()
+    frame["feasible"] = frame["feasible"].astype(bool)
+    frame["selected_in_window"] = frame["selected_in_window"].astype(bool)
+    out = (
+        frame.groupby("allowed_lateness_hours", as_index=False)
+        .agg(
+            windows=("window_index", "nunique"),
+            feasible_windows=("feasible", "sum"),
+            selected_windows=("selected_in_window", "sum"),
+            mean_late_event_fraction=("late_event_fraction", "mean"),
+            max_late_event_fraction=("late_event_fraction", "max"),
+            mean_revised_metric_cell_fraction=("revised_metric_cell_fraction", "mean"),
+            max_revised_metric_cell_fraction=("revised_metric_cell_fraction", "max"),
+            max_abs_revenue_revision_gbp=("max_abs_revenue_revision_gbp", "max"),
+            max_abs_paid_subscription_revision=("max_abs_paid_subscription_revision", "max"),
+        )
+    )
+    out["feasibility_rate"] = out["feasible_windows"] / out["windows"]
+    out["stable_all_windows"] = out["feasible_windows"].eq(out["windows"])
+    return out.sort_values("allowed_lateness_hours").reset_index(drop=True)
+
+
+def select_stable_watermark_policy(
+    stability_summary: pd.DataFrame,
+    budget: WatermarkRiskBudget = DEFAULT_WATERMARK_RISK_BUDGET,
+) -> dict[str, object]:
+    """Choose the shortest candidate feasible in every backtest window.
+
+    The rule is intentionally conservative and transparent. If no candidate is
+    feasible in all windows, the function reports that fact instead of quietly
+    relaxing the risk budget.
+    """
+    required = {"allowed_lateness_hours", "windows", "feasible_windows", "stable_all_windows"}
+    missing = required.difference(stability_summary.columns)
+    if missing:
+        raise ValueError(f"stability_summary missing columns: {sorted(missing)}")
+
+    stable = stability_summary.loc[
+        stability_summary["stable_all_windows"].astype(bool)
+    ].sort_values("allowed_lateness_hours")
+    selected = None if stable.empty else stable.iloc[0]
+    return {
+        "version": "1.0",
+        "selection_rule": "shortest candidate feasible in every rolling backtest window",
+        "weighted_score_used": False,
+        "budget_relaxed_after_backtest": False,
+        "budget": asdict(budget),
+        "status": "selected" if selected is not None else "no_candidate_stable_in_all_windows",
+        "selected_lateness_hours": None if selected is None else float(selected["allowed_lateness_hours"]),
+        "selected_feasibility_rate": None if selected is None else float(selected["feasibility_rate"]),
     }
 
 
