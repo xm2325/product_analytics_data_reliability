@@ -21,6 +21,33 @@ class ForecastEvaluation:
     reason: str
 
 
+def mature_metric_history(
+    gold_metrics: pd.DataFrame,
+    certified_events: pd.DataFrame,
+    product: str,
+    boundary_event: str = "first_open",
+) -> tuple[pd.DataFrame, object]:
+    """Trim generator-edge outcome tails before forecast validation.
+
+    The synthetic acquisition process stops at a fixed horizon, while trials,
+    subscriptions and purchases can arrive later. Those later outcomes belong
+    in historical metrics, but the artificial post-acquisition tail should not
+    be treated as a normal forecasting holdout. The last boundary-event date
+    is therefore the observation cutoff for forecast evaluation.
+    """
+    boundary = certified_events.loc[
+        certified_events["product"].eq(product) & certified_events["event_type"].eq(boundary_event),
+        "event_ts",
+    ]
+    if boundary.empty:
+        raise ValueError(f"No {boundary_event!r} events for product {product!r}")
+    cutoff = pd.to_datetime(boundary, utc=True).dt.date.max()
+    history = gold_metrics.loc[
+        gold_metrics["product"].eq(product) & gold_metrics["date"].le(cutoff)
+    ].copy()
+    return history.sort_values("date").reset_index(drop=True), cutoff
+
+
 def seasonal_naive(series: pd.Series, season: int = 7, holdout: int = 28) -> pd.DataFrame:
     y = pd.Series(series, dtype=float).reset_index(drop=True)
     if len(y) <= season + holdout:
