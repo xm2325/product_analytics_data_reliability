@@ -42,7 +42,8 @@ def test_event_contract_matches_current_config():
     assert contract["version"] == "1.2"
     assert contract["activity_event"] == "app_open"
     assert contract["generated_processing_time_column"] == "ingested_at"
-    assert "immediate arrivals" in contract["legacy_processing_time_fallback"]
+    fallback = contract["legacy_processing_time_fallback"]
+    assert "ingested_at" in fallback and "event_ts" in fallback
     assert set(contract["allowed_products"]) == {product.name for product in PRODUCTS}
     assert set(contract["allowed_event_types"]) == {
         "first_open",
