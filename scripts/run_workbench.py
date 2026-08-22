@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 from dataclasses import asdict
-from datetime import timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -17,13 +16,16 @@ from product_analytics.metrics import (
     dau_definition_migration,
     metric_contract_records,
     portfolio_conversion,
+    retention_contract_records,
+    retention_maturity_ledger,
+    retention_maturity_summary,
     retention_summary,
 )
 from product_analytics.pipeline import run_pipeline
 from product_analytics.provenance import write_manifest
 
 
-VERSION = "0.24.0"
+VERSION = "0.25.0"
 
 
 def _write_json(path: Path, payload: object) -> None:
@@ -79,15 +81,15 @@ def main() -> None:
         frame.to_csv(path, index=False)
         outputs.append(path)
 
-    # Acquisition cutoffs serve two purposes: they prevent the simulator's
-    # post-acquisition tail from contaminating forecast validation, and they
-    # define the comparable window for the DAU v1/v2 migration summary.
+    # The last first_open date is the common reporting boundary. It prevents
+    # simulator-generated follow-up after that date from leaking into either
+    # forecast validation or retention cohorts that have not matured yet.
     forecast_rows = []
-    forecast_cutoffs: dict[str, object] = {}
+    analysis_as_of_by_product: dict[str, object] = {}
     mature_gold_parts: list[pd.DataFrame] = []
     for product in sorted(gold["product"].unique()):
         frame, cutoff = mature_metric_history(gold, silver, product)
-        forecast_cutoffs[product] = cutoff
+        analysis_as_of_by_product[product] = cutoff
         mature_gold_parts.append(frame)
         for metric in ["dau", "revenue_gbp", "paid_subscription"]:
             backtest = seasonal_naive(frame[metric], season=7, holdout=28)
@@ -110,24 +112,28 @@ def main() -> None:
     migration_summary.to_csv(migration_summary_path, index=False)
     outputs.append(migration_summary_path)
 
-    config_by_product = {product.name: product for product in PRODUCTS}
-    retention_observation_end = {
-        product: pd.Timestamp(cutoff).date()
-        + timedelta(days=config_by_product[product].activity_horizon_days)
-        for product, cutoff in forecast_cutoffs.items()
-    }
+    maturity_ledger = retention_maturity_ledger(
+        silver,
+        horizons=(7, 30),
+        observation_end_by_product=analysis_as_of_by_product,
+    )
+    maturity_summary = retention_maturity_summary(maturity_ledger)
     retention = activity_retention(
         silver,
         horizons=(7, 30),
-        observation_end_by_product=retention_observation_end,
+        observation_end_by_product=analysis_as_of_by_product,
     )
     retention_overall = retention_summary(retention)
-    retention_path = out / "activity_retention_cohorts.csv"
-    retention.to_csv(retention_path, index=False)
-    outputs.append(retention_path)
-    retention_summary_path = out / "activity_retention_summary.csv"
-    retention_overall.to_csv(retention_summary_path, index=False)
-    outputs.append(retention_summary_path)
+
+    for name, frame in {
+        "retention_maturity_ledger.csv": maturity_ledger,
+        "retention_maturity_summary.csv": maturity_summary,
+        "activity_retention_cohorts.csv": retention,
+        "activity_retention_summary.csv": retention_overall,
+    }.items():
+        path = out / name
+        frame.to_csv(path, index=False)
+        outputs.append(path)
 
     quality = asdict(result["quality_report"])
     quality_path = out / "quality_report.json"
@@ -137,6 +143,10 @@ def main() -> None:
     metric_contracts_path = out / "metric_contracts.json"
     _write_json(metric_contracts_path, metric_contract_records())
     outputs.append(metric_contracts_path)
+
+    retention_contracts_path = out / "retention_contracts.json"
+    _write_json(retention_contracts_path, retention_contract_records())
+    outputs.append(retention_contracts_path)
 
     event_contract_path = out / "event_contract.json"
     _write_json(event_contract_path, event_contract())
@@ -150,14 +160,15 @@ def main() -> None:
         "quality": quality,
         "portfolio_conversion": portfolio_conversion(silver),
         "forecast_evaluations": forecast_rows,
-        "forecast_observation_cutoff": {
-            product: str(cutoff) for product, cutoff in forecast_cutoffs.items()
+        "analysis_as_of": {
+            product: str(cutoff) for product, cutoff in analysis_as_of_by_product.items()
         },
         "forecast_gate": {
             "approved": int(forecast_frame["approved"].sum()),
             "withheld": int((~forecast_frame["approved"]).sum()),
         },
         "dau_definition_migration": migration_summary.to_dict(orient="records"),
+        "retention_maturity": maturity_summary.to_dict(orient="records"),
         "activity_retention": retention_overall.to_dict(orient="records"),
         "revenue_reconciliation": reconciliation.to_dict(orient="records"),
     }
