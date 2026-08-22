@@ -1,39 +1,74 @@
 # Product Analytics & Data Reliability Workbench
 
-**Version:** v0.23  
+**Version:** v0.24  
 **Stack:** Python · DuckDB · SQL · Pandas · NumPy · SciPy · Statsmodels · Pytest · GitHub Actions
 
 A reproducible analytics workbench for a synthetic portfolio of subscription products. It is organised around one practical question:
 
 > When a product KPI moves, can the team trust the number, explain the movement, and make a defensible decision?
 
-The repository combines event certification, metric contracts, revenue reconciliation, forecasting gates, experiment guardrails and risk-aware evidence planning in one auditable workflow.
+The repository combines event certification, metric contracts, revenue reconciliation, activity/retention metrics, forecasting gates, experiment guardrails and risk-aware evidence planning in one auditable workflow.
 
-All data and results are synthetic, controlled-fault outputs or explicitly labelled planning stress tests. Nothing in this repository is presented as production-company performance.
+All data and results are synthetic, controlled-fault outputs or explicitly labelled planning stress tests. Nothing here is presented as production-company performance.
 
-## Verified v0.23 reference run
+## Verified v0.24 reference run
 
 GitHub Actions reproduced and validated the 120-day reference run with `seed=2206`:
 
 | Check | Verified result |
 |---|---:|
-| Raw events | **50,581** |
+| Raw events | **276,249** |
 | Rejected rows | **589** |
-| Certified rows | **49,992** |
+| Certified rows | **275,660** |
 | Raw revenue overstatement across products | **9.13%–10.96%** |
 | Paid conversion from first-open | **16.17%** |
 | Paid conversion conditional on trial-start | **48.55%** |
-| DAU forecasts approved | **3 / 3** |
-| DAU MAPE | **9.1%–12.5%** |
+| DAU v2 forecasts approved | **3 / 3** |
+| DAU v2 MAPE | **3.9%–5.9%** |
 | Revenue / paid-subscription forecasts withheld | **6 / 6** |
 | Revenue / paid-subscription MAPE | **25.6%–37.3%** |
-| Portable artifacts covered by SHA-256 manifest | **10** |
+| Portable artifacts covered by SHA-256 manifest | **15** |
 
-The forecast evaluation uses an explicit observation-maturity boundary: delayed trial/subscription/purchase events after the final acquisition day remain in historical metrics, but the artificial post-acquisition tail is excluded from the forecasting holdout. This prevents a simulator stopping boundary from being mistaken for a genuine product collapse.
+Commercial funnel and revenue results are unchanged from v0.23 because v0.24 gives product activity its own deterministic RNG stream. Adding `app_open` therefore does not silently redraw acquisition, trial, paid or purchase outcomes.
 
-## v0.23 at a glance
+## v0.24: define active use explicitly
 
-The current public workflow treats failed data as evidence rather than silently dropping it:
+The previous compact metric counted a user as daily active when they generated **any** certified event. That is convenient but semantically weak: a delayed purchase or subscription event does not necessarily mean the user opened or used the product that day.
+
+v0.24 introduces explicit `app_open` activity and a versioned migration:
+
+```text
+DAU v1 (deprecated) = unique users with any certified event
+DAU v2              = unique users with app_open
+```
+
+Both definitions run on the same certified event stream before the old one is retired.
+
+The verified mean migration effect is:
+
+| Product | Mean DAU v2 | Mean legacy DAU | Legacy overstatement |
+|---|---:|---:|---:|
+| File Transfer | 387.2 | 407.7 | **5.27%** |
+| Notes App | 733.2 | 749.4 | **2.21%** |
+| Photo Editor | 584.9 | 610.4 | **4.35%** |
+
+This is why metric migration is treated as a data-product change rather than renaming a dashboard field.
+
+## Activity retention
+
+The synthetic activity process creates one binary daily-return opportunity per user, with product-specific decaying return probability. Day-0 activity is explicit, and D7/D30 retention is defined by an `app_open` exactly 7 or 30 calendar days after first-open.
+
+Verified reference retention:
+
+| Product | D7 | D30 |
+|---|---:|---:|
+| File Transfer | **19.6%** | **6.2%** |
+| Notes App | **38.2%** | **21.9%** |
+| Photo Editor | **26.7%** | **11.4%** |
+
+These are simulator outputs, not real-product benchmarks.
+
+## Data reliability flow
 
 ```text
 Synthetic events
@@ -51,109 +86,46 @@ Silver certified events
       v
 Gold daily metrics
       |
-      +----> forecast_evaluations
+      +----> DAU v1/v2 migration
+      +----> D7/D30 activity retention
+      +----> forecast evaluations
       +----> metric/event contracts
       +----> SHA-256 manifest
 ```
 
-The CI pipeline runs unit tests, builds a 120-day deterministic reference dataset, validates the generated evidence, and uploads the resulting CSV/JSON/DuckDB bundle as a workflow artifact.
+Certification rejects duplicate IDs, missing identities, invalid timestamps/revenue, unknown products/events and non-zero revenue on non-purchase events. A rejected row remains inspectable with a semicolon-separated `reject_reason`; it is not silently discarded from the audit trail.
 
-## What the current workflow demonstrates
-
-| Capability | Current implementation |
-|---|---|
-| Data certification | Duplicate IDs, missing identities, invalid timestamps/revenue, unknown products/events and revenue-on-non-purchase rows are rejected with row-level reasons. |
-| Revenue reconciliation | Raw purchase revenue is compared with certified purchase revenue by product; controlled duplicate faults remain observable rather than entering Gold metrics. |
-| Metric semantics | Conversion metrics keep numerator, denominator, grain, unit and version as machine-readable contracts. |
-| Forecast governance | A seasonal-naive rolling evaluation is fitted for DAU, revenue and paid subscriptions per product; forecasts are explicitly approved or withheld by a declared gate and mature observation window. |
-| Safe recovery | Backfills use replacement semantics so replaying the same correction is a no-op. |
-| Experiment governance | Revenue evidence and paid-conversion harm clearance are separate, non-compensatory rollout gates. |
-| Evidence integrity | Portable outputs are SHA-256 hashed and independently validated after generation. |
-
-## Repository structure
-
-```text
-.
-├── src/product_analytics/
-│   ├── config.py             # synthetic product configuration
-│   ├── generator.py          # deterministic event generation + controlled faults
-│   ├── contracts.py          # machine-readable event contract
-│   ├── quality.py            # certification, rejects and reconciliation
-│   ├── metrics.py            # metric contracts and KPI calculations
-│   ├── forecasting.py        # mature-window forecast evaluation and planning gate
-│   ├── experiments.py        # experiment estimands and non-compensatory guardrails
-│   ├── risk_design.py        # allocation / evidence-planning primitives
-│   ├── provenance.py         # SHA-256 artifact manifest
-│   └── pipeline.py           # Bronze -> Silver -> Gold orchestration
-├── sql/
-├── scripts/
-│   ├── run_workbench.py
-│   └── validate_build.py
-├── tests/
-├── results/                  # current pinned summary + preserved planning snapshot
-├── docs/
-│   ├── METRIC_CONTRACTS.md
-│   ├── RESULTS.md
-│   └── REPRODUCIBILITY.md
-└── .github/workflows/ci.yml
-```
-
-## Data reliability design
-
-### Bronze: preserve what arrived
-
-Bronze keeps the raw synthetic event stream, including deliberately injected duplicate purchase rows and identity faults. Bad data is not rewritten in place.
-
-### Silver: certify and explain rejection
-
-Certification checks:
-
-- duplicate `event_id`;
-- missing or blank `user_id`;
-- unparseable timestamp;
-- non-numeric or negative revenue;
-- unknown product;
-- unknown event type;
-- non-zero revenue on a non-purchase event.
-
-A row can violate several rules. `rejected_events.csv` therefore stores a semicolon-separated `reject_reason`, preserving the complete failure evidence.
-
-The accounting invariant is enforced in the build validator:
+The validator enforces:
 
 ```text
 rows_raw = rows_certified + rows_rejected
 ```
 
-### Gold: calculate only from certified events
-
-Gold metrics consume Silver rows only. The workbench keeps validation evidence and business metrics separate so a bad record remains inspectable without silently affecting a certified KPI.
-
 ## Metric contracts
 
-Metric names are not definitions. The reference build writes `metric_contracts.json` and `event_contract.json`.
-
-For example, these are intentionally different metrics:
+The generated registry makes numerator, denominator, grain, unit and version explicit. Current activity contracts are:
 
 ```text
-paid_conversion_from_first_open
-paid_conversion_from_trial_start
+daily_active_users                    v2.0
+daily_active_users_legacy_any_event   v1.0-deprecated
 ```
 
-The verified reference values are 16.17% and 48.55% respectively. Both are correct because they answer different denominator questions. The contract stores numerator, denominator, grain, unit and version rather than relying on a dashboard label.
+Conversion contracts remain separately defined as paid / first-open and paid / trial-start. Their verified values are 16.17% and 48.55%; the difference is a denominator choice, not a contradiction.
+
+See [`docs/METRIC_CONTRACTS.md`](docs/METRIC_CONTRACTS.md).
 
 ## Forecast gate
 
-For each product, the workflow evaluates:
+The workflow evaluates DAU v2, revenue and paid subscriptions for each product with a seven-day seasonal-naive baseline over a 28-point holdout.
 
-- DAU;
-- revenue;
-- paid subscriptions.
+An explicit observation-maturity boundary trims dates after the final `first_open` before forecast validation. Delayed outcomes remain in historical metrics, but the simulator's artificial post-acquisition tail is not treated as a real product collapse.
 
-The compact implementation uses a seven-day seasonal-naive baseline over a 28-point holdout. Before the holdout is formed, `mature_metric_history` trims dates after the final `first_open` acquisition boundary so delayed outcomes do not create an artificial low-volume tail.
+In the verified v0.24 run:
 
-A forecast is withheld if there are too few holdout points, MAPE is not estimable, or MAPE exceeds the declared 20% threshold. In the verified reference run, all three DAU baselines pass at 9.1%–12.5% MAPE, while all six revenue/subscription baselines are withheld at 25.6%–37.3% MAPE.
+- all three `app_open` DAU forecasts pass at **3.9%–5.9% MAPE**;
+- all six revenue/subscription forecasts remain above the 20% planning gate at **25.6%–37.3% MAPE** and are withheld.
 
-The distinction is deliberate:
+The revenue/subscription errors are numerically unchanged from v0.23, providing a regression check that the activity extension did not alter the commercial stream.
 
 ```text
 model executed successfully != forecast approved for planning
@@ -173,11 +145,34 @@ Revenue upside is not allowed to mathematically compensate for a harmful convers
 
 ## Risk-aware allocation snapshot
 
-`results/risk_aware_design.csv` preserves a planning snapshot from the earlier risk-design study, including the 20/80 higher-price allocation example. The compact v0.23 package retains the allocation mathematics and constraint objects, but not the entire historical Monte Carlo portfolio-risk engine that produced every tail-risk quantity.
+`results/risk_aware_design.csv` preserves a planning snapshot from the earlier unequal-randomisation study. The compact package retains the allocation mathematics and constraint objects, but not the full historical Monte Carlo portfolio-risk engine.
 
-Therefore this result is explicitly a **preserved planning snapshot**, not a current-workflow regression target or a production recommendation. See [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md).
+It is therefore a **preserved planning snapshot**, not a current-workflow regression target or production recommendation. See [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md).
 
-This distinction is intentional: documentation should never be more reproducible than the code that supports it.
+## Repository structure
+
+```text
+.
+├── src/product_analytics/
+│   ├── config.py
+│   ├── generator.py          # commercial + isolated activity RNG streams
+│   ├── contracts.py
+│   ├── quality.py
+│   ├── metrics.py            # DAU v2, dual-run migration, retention
+│   ├── forecasting.py
+│   ├── experiments.py
+│   ├── risk_design.py
+│   ├── provenance.py
+│   └── pipeline.py
+├── sql/
+├── scripts/
+│   ├── run_workbench.py
+│   └── validate_build.py
+├── tests/
+├── results/
+├── docs/
+└── .github/workflows/ci.yml
+```
 
 ## Quick start
 
@@ -200,16 +195,15 @@ make check
 
 ## Generated reference evidence
 
-A successful build contains:
+A successful v0.24 build contains the certified pipeline outputs plus:
 
 ```text
-bronze_events.csv
-rejected_events.csv
-silver_events.csv
-gold_daily_metrics.csv
-revenue_reconciliation.csv
+product_config.csv
+dau_definition_migration.csv
+dau_definition_migration_summary.csv
+activity_retention_cohorts.csv
+activity_retention_summary.csv
 forecast_evaluations.csv
-quality_report.json
 metric_contracts.json
 event_contract.json
 reference_summary.json
@@ -217,22 +211,10 @@ MANIFEST.json
 workbench.duckdb
 ```
 
-`MANIFEST.json` stores file size and SHA-256 for the portable CSV/JSON evidence. `scripts/validate_build.py` verifies the hashes plus semantic invariants such as row accounting, reject reasons, product coverage and forecast/contract sets.
+`MANIFEST.json` stores file size and SHA-256 for all 15 portable CSV/JSON artifacts. `scripts/validate_build.py` also checks semantic invariants including the DAU migration direction, retention bounds/decay, product coverage and contract versions.
 
 ## Reproducibility boundary
 
-The repository intentionally separates:
+The repository intentionally separates current reproducible evidence from preserved historical planning snapshots. Numerical README claims must either be regenerated by the current workflow or explicitly labelled as preserved context.
 
-1. **current reproducible evidence** generated and checked by v0.23; and
-2. **preserved planning snapshots** retained for methodological context.
-
-See [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md) for the exact rule.
-
-## Development
-
-```bash
-make install
-make check
-```
-
-Changes to certification rules, metric definitions, forecast gates or experiment constraints should include tests. Numerical README claims should either be regenerated by the current workflow or explicitly labelled as preserved snapshots.
+See [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md).
