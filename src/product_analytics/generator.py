@@ -16,6 +16,7 @@ EVENT_COLUMNS = [
     "product",
     "event_type",
     "event_ts",
+    "ingested_at",
     "platform",
     "source",
     "revenue_gbp",
@@ -28,18 +29,21 @@ def generate_events(
     products: Iterable[ProductConfig] = PRODUCTS,
     inject_faults: bool = True,
 ) -> pd.DataFrame:
-    """Generate deterministic commercial and product-activity event streams.
+    """Generate deterministic event-time and processing-time product data.
 
-    Commercial/funnel randomness intentionally uses the same RNG stream as the
-    pre-v0.24 generator. Activity has a separate stream so adding `app_open`
-    does not silently alter acquisition, trial, paid or purchase outcomes.
+    Commercial/funnel randomness intentionally keeps the pre-v0.24 stream.
+    Product activity and ingestion delay use separate RNG streams, so adding
+    either system does not silently redraw acquisition, trial, paid or purchase
+    outcomes.
 
-    Each acquired user emits `first_open` and `app_open` on day 0. Later
-    `app_open` events are generated from a product-specific decaying return
-    probability for up to `activity_horizon_days`.
+    ``event_ts`` is when an action happened. ``ingested_at`` is when the data
+    platform first received it. Most events arrive promptly; a small controlled
+    tail arrives about four days later so watermark/backfill behaviour can be
+    tested without changing business truth.
     """
     commercial_rng = np.random.default_rng(seed)
     activity_rng = np.random.default_rng(seed + 1_000_003)
+    ingestion_rng = np.random.default_rng(seed + 2_000_003)
     start = datetime(2026, 1, 1, tzinfo=timezone.utc)
     rows: list[dict] = []
     event_seq = 0
@@ -68,6 +72,7 @@ def generate_events(
                             "product": product.name,
                             "event_type": event_type,
                             "event_ts": ts,
+                            "ingested_at": pd.NaT,
                             "platform": platform,
                             "source": source,
                             "revenue_gbp": float(revenue),
@@ -77,9 +82,6 @@ def generate_events(
                 add("first_open", base_ts)
                 add("app_open", base_ts + timedelta(minutes=1))
 
-                # Activity randomness is isolated from the commercial RNG. One
-                # daily opportunity is enough to model active-use retention
-                # without pretending to model session frequency.
                 for lag in range(1, product.activity_horizon_days + 1):
                     return_probability = product.activity_floor + product.activity_peak * np.exp(
                         -lag / product.activity_decay_days
@@ -103,6 +105,19 @@ def generate_events(
     frame = pd.DataFrame(rows, columns=EVENT_COLUMNS)
     frame["event_ts"] = pd.to_datetime(frame["event_ts"], utc=True)
 
+    # Separate processing-time stream. 99.5% of events arrive within the
+    # 48-hour contract; the 0.5% ~96-hour tail intentionally breaches it.
+    if not frame.empty:
+        delay_hours = ingestion_rng.choice(
+            np.array([0, 1, 2, 6, 24, 36, 96], dtype=int),
+            size=len(frame),
+            p=[0.55, 0.20, 0.10, 0.08, 0.045, 0.020, 0.005],
+        )
+        delay_minutes = ingestion_rng.integers(0, 60, size=len(frame))
+        frame["ingested_at"] = frame["event_ts"] + pd.to_timedelta(delay_hours, unit="h") + pd.to_timedelta(
+            delay_minutes, unit="m"
+        )
+
     if inject_faults and not frame.empty:
         purchase_idx = frame.index[frame["event_type"].eq("purchase")].to_numpy()
         if len(purchase_idx):
@@ -111,15 +126,12 @@ def generate_events(
             duplicates = frame.loc[dup_idx].copy()
             frame = pd.concat([frame, duplicates], ignore_index=True)
 
-        # Keep the controlled identity-fault experiment on the pre-existing
-        # commercial/funnel event family. This prevents a new high-volume
-        # activity event from changing the fault rate used for reconciliation.
         identity_candidates = frame.index[~frame["event_type"].eq("app_open")].to_numpy()
         n_identity_faults = max(1, int(round(0.002 * len(identity_candidates))))
         bad_idx = commercial_rng.choice(identity_candidates, size=n_identity_faults, replace=False)
         frame.loc[bad_idx, "user_id"] = None
 
-    return frame.sort_values("event_ts", kind="stable").reset_index(drop=True)
+    return frame.sort_values(["event_ts", "event_id"], kind="stable").reset_index(drop=True)
 
 
 def product_config_frame(products: Iterable[ProductConfig] = PRODUCTS) -> pd.DataFrame:

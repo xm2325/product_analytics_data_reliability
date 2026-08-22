@@ -1,34 +1,44 @@
 claim,value,unit,context,interpretation_limit
-rows_raw,276249,rows,v0.25 seed=2206 days=120 synthetic reference,includes explicit app_open activity
-rows_rejected,589,rows,v0.25 certification,controlled faults remain on commercial event family
-rows_certified,275660,rows,v0.25 certification,synthetic data
-raw_revenue_overstatement_min,9.1278,percent,v0.25 controlled-fault reconciliation,synthetic data
-raw_revenue_overstatement_max,10.9569,percent,v0.25 controlled-fault reconciliation,synthetic data
-conversion_from_first_open,16.1663,percent,v0.25 commercial stream preserved,denominator is first_open
-conversion_from_trial_start,48.5473,percent,v0.25 commercial stream preserved,denominator is trial_start
-dau_forecasts_approved,3,count,v0.25 app_open DAU forecast evaluation,planning gate only
-revenue_subscription_forecasts_withheld,6,count,v0.25 commercial forecast evaluation,planning gate only
-dau_mape_min,3.8916,percent,v0.25 28-point holdout,app_open DAU seasonal-naive baseline
-dau_mape_max,5.9191,percent,v0.25 28-point holdout,app_open DAU seasonal-naive baseline
-revenue_subscription_mape_min,25.5931,percent,v0.25 28-point holdout,commercial stream unchanged
-revenue_subscription_mape_max,37.3253,percent,v0.25 28-point holdout,commercial stream unchanged
-legacy_dau_overstatement_file_transfer,5.2746,percent,v0.25 dual-run mean DAU,legacy any-event relative to app-open DAU
-legacy_dau_overstatement_notes_app,2.2096,percent,v0.25 dual-run mean DAU,legacy any-event relative to app-open DAU
-legacy_dau_overstatement_photo_editor,4.3497,percent,v0.25 dual-run mean DAU,legacy any-event relative to app-open DAU
-file_transfer_d7_mature_users,9450,users,v0.25 analysis_as_of=2026-04-30,573 later-cohort users excluded
-file_transfer_d30_mature_users,7426,users,v0.25 analysis_as_of=2026-04-30,2597 later-cohort users excluded
-notes_app_d7_mature_users,8643,users,v0.25 analysis_as_of=2026-04-30,525 later-cohort users excluded
-notes_app_d30_mature_users,6947,users,v0.25 analysis_as_of=2026-04-30,2221 later-cohort users excluded
-photo_editor_d7_mature_users,10352,users,v0.25 analysis_as_of=2026-04-30,637 later-cohort users excluded
-photo_editor_d30_mature_users,8199,users,v0.25 analysis_as_of=2026-04-30,2790 later-cohort users excluded
-file_transfer_d7_retention,19.5556,percent,v0.25 exact-day mature-only app_open retention,synthetic activity model
-file_transfer_d30_retention,6.3560,percent,v0.25 exact-day mature-only app_open retention,synthetic activity model
-notes_app_d7_retention,38.3547,percent,v0.25 exact-day mature-only app_open retention,synthetic activity model
-notes_app_d30_retention,21.8799,percent,v0.25 exact-day mature-only app_open retention,synthetic activity model
-photo_editor_d7_retention,26.8161,percent,v0.25 exact-day mature-only app_open retention,synthetic activity model
-photo_editor_d30_retention,11.1965,percent,v0.25 exact-day mature-only app_open retention,synthetic activity model
-d7_eligible_fraction_min,94.2033,percent,v0.25 point-in-time maturity denominator,not a retention-rate metric
-d7_eligible_fraction_max,94.2831,percent,v0.25 point-in-time maturity denominator,not a retention-rate metric
-d30_eligible_fraction_min,74.0896,percent,v0.25 point-in-time maturity denominator,not a retention-rate metric
-d30_eligible_fraction_max,75.7744,percent,v0.25 point-in-time maturity denominator,not a retention-rate metric
-manifest_artifacts,18,count,v0.25 portable reference evidence,SHA-256 integrity manifest
+rows_raw,276249,rows,v0.26 seed=2206 days=120 synthetic reference,includes explicit app_open activity and processing time
+rows_rejected,589,rows,v0.26 certification,controlled faults remain on commercial event family
+rows_certified,275660,rows,v0.26 certification,synthetic data
+raw_revenue_overstatement_min,9.1278,percent,v0.26 controlled-fault reconciliation,synthetic data
+raw_revenue_overstatement_max,10.9569,percent,v0.26 controlled-fault reconciliation,synthetic data
+conversion_from_first_open,16.1663,percent,v0.26 commercial stream preserved,denominator is first_open
+conversion_from_trial_start,48.5473,percent,v0.26 commercial stream preserved,denominator is trial_start
+dau_forecasts_approved,3,count,v0.26 app_open DAU forecast evaluation,planning gate only
+revenue_subscription_forecasts_withheld,6,count,v0.26 commercial forecast evaluation,planning gate only
+dau_mape_min,3.8916,percent,v0.26 28-point holdout,app_open DAU seasonal-naive baseline
+dau_mape_max,5.9191,percent,v0.26 28-point holdout,app_open DAU seasonal-naive baseline
+revenue_subscription_mape_min,25.5931,percent,v0.26 28-point holdout,commercial stream unchanged
+revenue_subscription_mape_max,37.3253,percent,v0.26 28-point holdout,commercial stream unchanged
+legacy_dau_overstatement_file_transfer,5.2746,percent,v0.26 dual-run mean DAU,legacy any-event relative to app-open DAU
+legacy_dau_overstatement_notes_app,2.2096,percent,v0.26 dual-run mean DAU,legacy any-event relative to app-open DAU
+legacy_dau_overstatement_photo_editor,4.3497,percent,v0.26 dual-run mean DAU,legacy any-event relative to app-open DAU
+file_transfer_d7_mature_users,9450,users,v0.26 analysis_as_of=2026-04-30,573 later-cohort users excluded
+file_transfer_d30_mature_users,7426,users,v0.26 analysis_as_of=2026-04-30,2597 later-cohort users excluded
+notes_app_d7_mature_users,8643,users,v0.26 analysis_as_of=2026-04-30,525 later-cohort users excluded
+notes_app_d30_mature_users,6947,users,v0.26 analysis_as_of=2026-04-30,2221 later-cohort users excluded
+photo_editor_d7_mature_users,10352,users,v0.26 analysis_as_of=2026-04-30,637 later-cohort users excluded
+photo_editor_d30_mature_users,8199,users,v0.26 analysis_as_of=2026-04-30,2790 later-cohort users excluded
+file_transfer_d7_retention,19.5556,percent,v0.26 exact-day mature-only app_open retention,synthetic activity model
+file_transfer_d30_retention,6.3560,percent,v0.26 exact-day mature-only app_open retention,synthetic activity model
+notes_app_d7_retention,38.3547,percent,v0.26 exact-day mature-only app_open retention,synthetic activity model
+notes_app_d30_retention,21.8799,percent,v0.26 exact-day mature-only app_open retention,synthetic activity model
+photo_editor_d7_retention,26.8161,percent,v0.26 exact-day mature-only app_open retention,synthetic activity model
+photo_editor_d30_retention,11.1965,percent,v0.26 exact-day mature-only app_open retention,synthetic activity model
+d7_eligible_fraction_min,94.2033,percent,v0.26 point-in-time maturity denominator,not a retention-rate metric
+d7_eligible_fraction_max,94.2831,percent,v0.26 point-in-time maturity denominator,not a retention-rate metric
+d30_eligible_fraction_min,74.0896,percent,v0.26 point-in-time maturity denominator,not a retention-rate metric
+d30_eligible_fraction_max,75.7744,percent,v0.26 point-in-time maturity denominator,not a retention-rate metric
+processing_watermark,48,hours,v0.26 processing-time policy,scenario policy not empirically optimal SLA
+late_beyond_watermark_events,1367,events,v0.26 certified events with ingestion delay >48h,synthetic delay model
+late_beyond_watermark_fraction,0.4959,percent,v0.26 certified-event processing delay,synthetic delay model
+processing_snapshot,2026-04-30T23:59:59.999999Z,timestamp,v0.26 point-in-time processing snapshot,not wall-clock current time
+watermark_event_date,2026-04-28,date,v0.26 finalization boundary at 48h,event dates after boundary are provisional
+late_missing_from_finalized_snapshot,24,events,v0.26 events not yet ingested although event date was nominally final,requires reconciliation/backfill
+revised_finalized_metric_cells,8,product-date-metric cells,v0.26 settled versus point-in-time KPI comparison,not eight unique calendar dates
+notes_app_late_revenue_revision,7.99,GBP,v0.26 one finalized revenue cell revised after watermark,synthetic value
+photo_editor_late_paid_revision,1,subscriptions,v0.26 one finalized paid-subscription cell revised after watermark,synthetic value
+unit_parity_tests,36,passed,v0.26 GitHub Actions,includes processing-time and SQL parity tests
+manifest_artifacts,23,count,v0.26 portable reference evidence,SHA-256 integrity manifest

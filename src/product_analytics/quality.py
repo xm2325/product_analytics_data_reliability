@@ -25,6 +25,8 @@ class QualityReport:
     duplicate_event_rows: int
     missing_identity_rows: int
     invalid_timestamp_rows: int
+    invalid_ingestion_timestamp_rows: int
+    ingestion_before_event_rows: int
     invalid_revenue_rows: int
     unknown_product_rows: int
     unknown_event_type_rows: int
@@ -41,10 +43,11 @@ def _append_reason(reason: pd.Series, mask: pd.Series, label: str) -> pd.Series:
 def certify_events_with_rejects(
     events: pd.DataFrame,
 ) -> tuple[pd.DataFrame, QualityReport, pd.DataFrame]:
-    """Certify raw events and preserve row-level rejection evidence.
+    """Certify events while preserving row-level rejection evidence.
 
-    A row may violate more than one rule. `reject_reason` therefore stores a
-    semicolon-separated list instead of forcing mutually exclusive categories.
+    Current generated sources carry explicit ``ingested_at`` processing time.
+    Legacy callers may omit it; those rows are treated as immediate arrivals at
+    event_ts and retain the pre-v0.26 error taxonomy.
     """
     missing = REQUIRED_COLUMNS.difference(events.columns)
     if missing:
@@ -52,11 +55,23 @@ def certify_events_with_rejects(
 
     df = events.copy()
     parsed_ts = pd.to_datetime(df["event_ts"], errors="coerce", utc=True)
+    has_explicit_ingestion = "ingested_at" in df.columns
+    if has_explicit_ingestion:
+        parsed_ingested = pd.to_datetime(df["ingested_at"], errors="coerce", utc=True)
+    else:
+        parsed_ingested = parsed_ts.copy()
+        df["ingested_at"] = parsed_ingested
     revenue_numeric = pd.to_numeric(df["revenue_gbp"], errors="coerce")
 
     duplicate = df.duplicated("event_id", keep="first")
     missing_identity = df["user_id"].isna() | df["user_id"].astype("string").str.strip().eq("")
     invalid_ts = parsed_ts.isna()
+    if has_explicit_ingestion:
+        invalid_ingested = parsed_ingested.isna()
+        ingestion_before_event = parsed_ts.notna() & parsed_ingested.notna() & parsed_ingested.lt(parsed_ts)
+    else:
+        invalid_ingested = pd.Series(False, index=df.index)
+        ingestion_before_event = pd.Series(False, index=df.index)
     invalid_revenue = revenue_numeric.isna() | revenue_numeric.lt(0)
     unknown_product = ~df["product"].isin(ALLOWED_PRODUCTS)
     unknown_event_type = ~df["event_type"].isin(ALLOWED_EVENT_TYPES)
@@ -67,6 +82,8 @@ def certify_events_with_rejects(
         (duplicate, "duplicate_event_id"),
         (missing_identity, "missing_identity"),
         (invalid_ts, "invalid_timestamp"),
+        (invalid_ingested, "invalid_ingestion_timestamp"),
+        (ingestion_before_event, "ingestion_before_event"),
         (invalid_revenue, "invalid_revenue"),
         (unknown_product, "unknown_product"),
         (unknown_event_type, "unknown_event_type"),
@@ -77,12 +94,14 @@ def certify_events_with_rejects(
     valid = reason.eq("")
     certified = df.loc[valid].copy()
     certified["event_ts"] = parsed_ts.loc[valid]
+    certified["ingested_at"] = parsed_ingested.loc[valid]
     certified["revenue_gbp"] = revenue_numeric.loc[valid].astype(float)
     certified = certified.sort_values(["event_ts", "event_id"], kind="stable").reset_index(drop=True)
 
     rejected = df.loc[~valid].copy()
     rejected["reject_reason"] = reason.loc[~valid].astype(str)
     rejected["event_ts_parsed"] = parsed_ts.loc[~valid]
+    rejected["ingested_at_parsed"] = parsed_ingested.loc[~valid]
     rejected["revenue_gbp_parsed"] = revenue_numeric.loc[~valid]
     rejected = rejected.reset_index(drop=True)
 
@@ -91,6 +110,8 @@ def certify_events_with_rejects(
         duplicate_event_rows=int(duplicate.sum()),
         missing_identity_rows=int(missing_identity.sum()),
         invalid_timestamp_rows=int(invalid_ts.sum()),
+        invalid_ingestion_timestamp_rows=int(invalid_ingested.sum()),
+        ingestion_before_event_rows=int(ingestion_before_event.sum()),
         invalid_revenue_rows=int(invalid_revenue.sum()),
         unknown_product_rows=int(unknown_product.sum()),
         unknown_event_type_rows=int(unknown_event_type.sum()),

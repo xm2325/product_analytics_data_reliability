@@ -1,5 +1,7 @@
 -- SQL implementation of the current compact Silver certification contract.
--- Python additionally preserves every rejected row with multi-rule reasons.
+-- Python additionally supports legacy inputs without ingested_at by treating
+-- them as immediate arrivals. Current v0.26 generated sources always include
+-- explicit processing time and must satisfy ingested_at >= event_ts.
 WITH ranked AS (
     SELECT
         *,
@@ -12,6 +14,8 @@ WHERE rn = 1
   AND user_id IS NOT NULL
   AND trim(user_id) <> ''
   AND event_ts IS NOT NULL
+  AND ingested_at IS NOT NULL
+  AND ingested_at >= event_ts
   AND revenue_gbp >= 0
   AND product IN ('photo_editor', 'notes_app', 'file_transfer')
   AND event_type IN ('first_open', 'app_open', 'trial_start', 'paid_subscription', 'purchase')
