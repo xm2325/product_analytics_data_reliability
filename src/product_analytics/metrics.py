@@ -16,6 +16,19 @@ class MetricContract:
     version: str = "1.0"
 
 
+@dataclass(frozen=True)
+class RetentionContract:
+    name: str
+    cohort_event: str
+    return_event: str
+    horizon_days: int
+    return_window: str
+    denominator: str
+    grain: str = "product-cohort_date"
+    unit: str = "ratio"
+    version: str = "1.0"
+
+
 METRIC_CONTRACTS = {
     "daily_active_users": MetricContract(
         "daily_active_users",
@@ -48,9 +61,34 @@ METRIC_CONTRACTS = {
 }
 
 
+RETENTION_CONTRACTS = {
+    "d7_activity_retention": RetentionContract(
+        "d7_activity_retention",
+        cohort_event="first_open",
+        return_event="app_open",
+        horizon_days=7,
+        return_window="exact_calendar_day",
+        denominator="users in acquisition cohorts whose D7 target date is on or before analysis_as_of",
+    ),
+    "d30_activity_retention": RetentionContract(
+        "d30_activity_retention",
+        cohort_event="first_open",
+        return_event="app_open",
+        horizon_days=30,
+        return_window="exact_calendar_day",
+        denominator="users in acquisition cohorts whose D30 target date is on or before analysis_as_of",
+    ),
+}
+
+
 def metric_contract_records() -> list[dict[str, str]]:
     """Return deterministic, machine-readable metric definitions."""
     return [asdict(METRIC_CONTRACTS[name]) for name in sorted(METRIC_CONTRACTS)]
+
+
+def retention_contract_records() -> list[dict[str, object]]:
+    """Return deterministic contracts for exact-day activity retention."""
+    return [asdict(RETENTION_CONTRACTS[name]) for name in sorted(RETENTION_CONTRACTS)]
 
 
 def daily_metrics(events: pd.DataFrame) -> pd.DataFrame:
@@ -109,17 +147,21 @@ def dau_definition_migration(gold_metrics: pd.DataFrame) -> pd.DataFrame:
     return out.sort_values(["product", "date"]).reset_index(drop=True)
 
 
-def activity_retention(
+def retention_maturity_ledger(
     events: pd.DataFrame,
     horizons: tuple[int, ...] = (7, 30),
     observation_end_by_product: dict[str, object] | None = None,
 ) -> pd.DataFrame:
-    """Calculate acquisition-cohort return rates from explicit app-open events.
+    """Audit every cohort/horizon before it is allowed into retention.
 
-    A user is retained at horizon h when they have an `app_open` exactly h
-    calendar days after their first-open cohort date. Cohorts are included only
-    when the supplied observation boundary makes that horizon fully mature.
+    The ledger keeps immature cohorts visible rather than silently dropping
+    them. Future app-open events may exist in a simulation or backfilled source,
+    but they are not allowed to leak into a metric whose declared
+    ``analysis_as_of`` is earlier than the target date.
     """
+    if not horizons or any(horizon <= 0 for horizon in horizons):
+        raise ValueError("Retention horizons must be positive")
+
     df = events.copy()
     df["date"] = pd.to_datetime(df["event_ts"], utc=True).dt.date
     acquisitions = (
@@ -133,55 +175,101 @@ def activity_retention(
         .drop_duplicates()
         .rename(columns={"date": "target_date"})
     )
-    activity["retained"] = 1
+    activity["returned"] = 1
 
     rows: list[dict[str, object]] = []
     for product, product_acquisitions in acquisitions.groupby("product"):
         if observation_end_by_product and product in observation_end_by_product:
-            observation_end = pd.Timestamp(observation_end_by_product[product]).date()
+            analysis_as_of = pd.Timestamp(observation_end_by_product[product]).date()
         else:
-            product_dates = df.loc[df["product"].eq(product), "date"]
-            observation_end = product_dates.max()
+            analysis_as_of = df.loc[df["product"].eq(product), "date"].max()
 
-        for horizon in horizons:
-            if horizon <= 0:
-                raise ValueError("Retention horizons must be positive")
-            mature = product_acquisitions.loc[
-                product_acquisitions["cohort_date"].map(
-                    lambda value: value + timedelta(days=horizon) <= observation_end
-                )
-            ].copy()
-            if mature.empty:
-                continue
-            mature["target_date"] = mature["cohort_date"].map(
+        for horizon in sorted(set(horizons)):
+            user_targets = product_acquisitions.copy()
+            user_targets["target_date"] = user_targets["cohort_date"].map(
                 lambda value: value + timedelta(days=horizon)
             )
-            joined = mature.merge(
+            joined = user_targets.merge(
                 activity,
                 on=["product", "user_id", "target_date"],
                 how="left",
             )
-            joined["retained"] = joined["retained"].fillna(0).astype(int)
-            cohort = joined.groupby("cohort_date")["retained"].agg(["size", "sum"]).reset_index()
+            joined["returned"] = joined["returned"].fillna(0).astype(int)
+            joined["mature"] = joined["target_date"].le(analysis_as_of)
+
+            cohort = (
+                joined.groupby(["cohort_date", "target_date", "mature"], as_index=False)
+                .agg(cohort_users=("user_id", "size"), observed_returns=("returned", "sum"))
+            )
             for record in cohort.to_dict(orient="records"):
-                eligible = int(record["size"])
-                retained = int(record["sum"])
+                mature = bool(record["mature"])
+                cohort_users = int(record["cohort_users"])
+                retained_users = int(record["observed_returns"]) if mature else pd.NA
                 rows.append(
                     {
                         "product": product,
                         "cohort_date": record["cohort_date"],
                         "horizon_days": int(horizon),
-                        "eligible_users": eligible,
-                        "retained_users": retained,
-                        "retention_rate": retained / eligible if eligible else float("nan"),
+                        "target_date": record["target_date"],
+                        "analysis_as_of": analysis_as_of,
+                        "mature": mature,
+                        "maturity_status": "mature" if mature else "immature",
+                        "cohort_users": cohort_users,
+                        "eligible_users": cohort_users if mature else 0,
+                        "excluded_users": 0 if mature else cohort_users,
+                        "retained_users": retained_users,
+                        "retention_rate": (
+                            float(retained_users) / cohort_users if mature and cohort_users else float("nan")
+                        ),
+                        "exclusion_reason": "" if mature else "target_date_after_analysis_as_of",
                     }
                 )
 
+    if not rows:
+        return pd.DataFrame(
+            columns=[
+                "product",
+                "cohort_date",
+                "horizon_days",
+                "target_date",
+                "analysis_as_of",
+                "mature",
+                "maturity_status",
+                "cohort_users",
+                "eligible_users",
+                "excluded_users",
+                "retained_users",
+                "retention_rate",
+                "exclusion_reason",
+            ]
+        )
     return pd.DataFrame(rows).sort_values(["product", "horizon_days", "cohort_date"]).reset_index(drop=True)
 
 
+def activity_retention(
+    events: pd.DataFrame,
+    horizons: tuple[int, ...] = (7, 30),
+    observation_end_by_product: dict[str, object] | None = None,
+) -> pd.DataFrame:
+    """Calculate exact-day return rates from mature acquisition cohorts only."""
+    ledger = retention_maturity_ledger(
+        events,
+        horizons=horizons,
+        observation_end_by_product=observation_end_by_product,
+    )
+    mature = ledger.loc[ledger["mature"]].copy()
+    if mature.empty:
+        return pd.DataFrame(
+            columns=["product", "cohort_date", "horizon_days", "eligible_users", "retained_users", "retention_rate"]
+        )
+    mature["retained_users"] = mature["retained_users"].astype(int)
+    return mature[
+        ["product", "cohort_date", "horizon_days", "eligible_users", "retained_users", "retention_rate"]
+    ].reset_index(drop=True)
+
+
 def retention_summary(cohort_retention: pd.DataFrame) -> pd.DataFrame:
-    """Aggregate cohort retention using eligible-user weighting."""
+    """Aggregate mature cohort retention using eligible-user weighting."""
     if cohort_retention.empty:
         return pd.DataFrame(
             columns=["product", "horizon_days", "eligible_users", "retained_users", "retention_rate"]
@@ -192,6 +280,52 @@ def retention_summary(cohort_retention: pd.DataFrame) -> pd.DataFrame:
     )
     out["retention_rate"] = out["retained_users"] / out["eligible_users"]
     return out.sort_values(["product", "horizon_days"]).reset_index(drop=True)
+
+
+def retention_maturity_summary(ledger: pd.DataFrame) -> pd.DataFrame:
+    """Summarise how much cohort evidence is mature versus excluded."""
+    if ledger.empty:
+        return pd.DataFrame(
+            columns=[
+                "product",
+                "horizon_days",
+                "analysis_as_of",
+                "cohorts",
+                "mature_cohorts",
+                "immature_cohorts",
+                "cohort_users",
+                "eligible_users",
+                "excluded_users",
+                "eligible_user_fraction",
+            ]
+        )
+    working = ledger.copy()
+    working["mature_int"] = working["mature"].astype(int)
+    out = (
+        working.groupby(["product", "horizon_days", "analysis_as_of"], as_index=False)
+        .agg(
+            cohorts=("cohort_date", "size"),
+            mature_cohorts=("mature_int", "sum"),
+            cohort_users=("cohort_users", "sum"),
+            eligible_users=("eligible_users", "sum"),
+            excluded_users=("excluded_users", "sum"),
+        )
+    )
+    out["immature_cohorts"] = out["cohorts"] - out["mature_cohorts"]
+    out["eligible_user_fraction"] = out["eligible_users"] / out["cohort_users"].replace(0, pd.NA)
+    columns = [
+        "product",
+        "horizon_days",
+        "analysis_as_of",
+        "cohorts",
+        "mature_cohorts",
+        "immature_cohorts",
+        "cohort_users",
+        "eligible_users",
+        "excluded_users",
+        "eligible_user_fraction",
+    ]
+    return out[columns].sort_values(["product", "horizon_days"]).reset_index(drop=True)
 
 
 def portfolio_conversion(events: pd.DataFrame) -> dict[str, float]:

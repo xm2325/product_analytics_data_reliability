@@ -20,10 +20,13 @@ EXPECTED_PORTABLE_ARTIFACTS = {
     "forecast_evaluations.csv",
     "dau_definition_migration.csv",
     "dau_definition_migration_summary.csv",
+    "retention_maturity_ledger.csv",
+    "retention_maturity_summary.csv",
     "activity_retention_cohorts.csv",
     "activity_retention_summary.csv",
     "quality_report.json",
     "metric_contracts.json",
+    "retention_contracts.json",
     "event_contract.json",
     "reference_summary.json",
     "MANIFEST.json",
@@ -86,6 +89,15 @@ def validate_build(root: Path) -> list[str]:
     if "deprecated" not in contract_by_name.get("daily_active_users_legacy_any_event", {}).get("version", ""):
         failures.append("dau_v1_not_deprecated")
 
+    retention_contracts = json.loads((root / "retention_contracts.json").read_text(encoding="utf-8"))
+    retention_contract_by_name = {row["name"]: row for row in retention_contracts}
+    if set(retention_contract_by_name) != {"d7_activity_retention", "d30_activity_retention"}:
+        failures.append("retention_contract_set")
+    if {row["horizon_days"] for row in retention_contracts} != {7, 30}:
+        failures.append("retention_contract_horizons")
+    if any(row["return_window"] != "exact_calendar_day" for row in retention_contracts):
+        failures.append("retention_contract_window")
+
     event = json.loads((root / "event_contract.json").read_text(encoding="utf-8"))
     if set(event["allowed_products"]) != expected_products:
         failures.append("event_contract_products")
@@ -109,6 +121,47 @@ def validate_build(root: Path) -> list[str]:
     if (migration_summary["mean_dau_v2"] <= 0).any():
         failures.append("nonpositive_dau_v2")
 
+    maturity = pd.read_csv(root / "retention_maturity_ledger.csv")
+    if set(maturity["product"]) != expected_products:
+        failures.append("maturity_product_set")
+    if set(maturity["horizon_days"]) != {7, 30}:
+        failures.append("maturity_horizon_set")
+    maturity["mature"] = maturity["mature"].astype(str).str.lower().eq("true")
+    mature = maturity.loc[maturity["mature"]].copy()
+    immature = maturity.loc[~maturity["mature"]].copy()
+    if mature.empty or immature.empty:
+        failures.append("maturity_states_not_both_present")
+    if not (mature["eligible_users"] == mature["cohort_users"]).all() or not (mature["excluded_users"] == 0).all():
+        failures.append("mature_denominator_accounting")
+    if mature["retained_users"].isna().any() or not mature["retention_rate"].between(0, 1).all():
+        failures.append("mature_retention_missing_or_invalid")
+    if not (immature["eligible_users"] == 0).all() or not (immature["excluded_users"] == immature["cohort_users"]).all():
+        failures.append("immature_denominator_accounting")
+    if immature["retained_users"].notna().any() or immature["retention_rate"].notna().any():
+        failures.append("immature_future_outcomes_leaked")
+    if not immature["exclusion_reason"].eq("target_date_after_analysis_as_of").all():
+        failures.append("immature_exclusion_reason")
+    mature_target = pd.to_datetime(mature["target_date"])
+    mature_as_of = pd.to_datetime(mature["analysis_as_of"])
+    immature_target = pd.to_datetime(immature["target_date"])
+    immature_as_of = pd.to_datetime(immature["analysis_as_of"])
+    if not mature_target.le(mature_as_of).all() or not immature_target.gt(immature_as_of).all():
+        failures.append("maturity_date_boundary")
+
+    maturity_summary = pd.read_csv(root / "retention_maturity_summary.csv")
+    if set(maturity_summary["product"]) != expected_products or len(maturity_summary) != len(PRODUCTS) * 2:
+        failures.append("maturity_summary_product_set")
+    if not (maturity_summary["mature_cohorts"] + maturity_summary["immature_cohorts"] == maturity_summary["cohorts"]).all():
+        failures.append("maturity_cohort_accounting")
+    if not (maturity_summary["eligible_users"] + maturity_summary["excluded_users"] == maturity_summary["cohort_users"]).all():
+        failures.append("maturity_user_accounting")
+    maturity_pivot = maturity_summary.pivot(index="product", columns="horizon_days", values="eligible_user_fraction")
+    if not (maturity_pivot[30] < maturity_pivot[7]).all():
+        failures.append("longer_horizon_not_less_mature")
+
+    retention_cohorts = pd.read_csv(root / "activity_retention_cohorts.csv")
+    if len(retention_cohorts) != len(mature):
+        failures.append("retention_cohorts_not_mature_subset")
     retention = pd.read_csv(root / "activity_retention_summary.csv")
     if set(retention["product"]) != expected_products:
         failures.append("retention_product_set")
