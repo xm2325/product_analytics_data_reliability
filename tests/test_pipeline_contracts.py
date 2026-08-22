@@ -15,6 +15,8 @@ def test_pipeline_persists_auditable_tables(tmp_path):
     assert len(result["silver_events"]) + len(result["rejected_events"]) == len(raw)
     assert result["quality_report"].rows_rejected == len(result["rejected_events"])
     assert "app_open" in set(result["silver_events"]["event_type"])
+    assert "ingested_at" in result["silver_events"].columns
+    assert result["silver_events"]["ingested_at"].ge(result["silver_events"]["event_ts"]).all()
     assert {"dau", "dau_legacy_any_event", "dau_definition_delta"}.issubset(
         result["gold_daily_metrics"].columns
     )
@@ -37,8 +39,10 @@ def test_pipeline_persists_auditable_tables(tmp_path):
 
 def test_event_contract_matches_current_config():
     contract = event_contract()
-    assert contract["version"] == "1.1"
+    assert contract["version"] == "1.2"
     assert contract["activity_event"] == "app_open"
+    assert contract["generated_processing_time_column"] == "ingested_at"
+    assert "immediate arrivals" in contract["legacy_processing_time_fallback"]
     assert set(contract["allowed_products"]) == {product.name for product in PRODUCTS}
     assert set(contract["allowed_event_types"]) == {
         "first_open",
@@ -49,6 +53,7 @@ def test_event_contract_matches_current_config():
     }
     assert "revenue_scope" in contract["rules"]
     assert "active_use" in contract["rules"]
+    assert "ingested_at" in contract["rules"]
 
 
 def test_metric_contracts_are_versioned_and_distinct():
