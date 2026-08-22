@@ -10,6 +10,7 @@
 - added an independent generated-build validator;
 - upgraded CI to build, validate and upload a 120-day reference-evidence artifact;
 - excluded the synthetic post-acquisition outcome tail from forecast validation using an explicit observation-maturity cutoff;
+- pinned the verified 120-day reference summary after remote CI reproduced 50,581 raw / 589 rejected / 49,992 certified rows and a 3-pass / 6-withhold forecast gate;
 - separated current reproducible evidence from preserved historical planning snapshots.
 
 ## v0.22.0
