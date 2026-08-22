@@ -1,14 +1,15 @@
 claim,value,unit,context,interpretation_limit
-raw_revenue_overstatement_min,9.2,percent,controlled-fault reference run,synthetic data
-raw_revenue_overstatement_max,12.2,percent,controlled-fault reference run,synthetic data
-conversion_from_first_open,18.0,percent,versioned metric contract,denominator is first_open
-conversion_from_trial_start,56.6,percent,versioned metric contract,denominator is trial_start
-dau_forecasts_approved,3,count,rolling-origin reference evaluation,planning gate only
-revenue_subscription_forecasts_withheld,6,count,rolling-origin reference evaluation,planning gate only
-idempotent_backfill_second_run_delta,0.00,GBP,reference replay test,synthetic KPI correction
-risk_aware_treatment_share,20,percent,planning stress test,requires arm-variance validation
-risk_aware_total_users,1094,users,700 balanced-equivalent information units,equal-variance planning assumption
-risk_aware_higher_price_users,219,users,risk-aware planning candidate,not a production recommendation
-balanced_50_50_higher_price_users,350,users,comparable planned information,reference comparator
-higher_price_exposure_reduction,37.4,percent,219 versus 350,planning comparison
-risk_aware_readout,270,days,reference traffic/outcome assumptions,recompute for target product
+rows_raw,50581,rows,v0.23 seed=2206 days=120 synthetic reference,deterministic synthetic data
+rows_rejected,589,rows,v0.23 certification,controlled faults only
+rows_certified,49992,rows,v0.23 certification,synthetic data
+raw_revenue_overstatement_min,9.1278,percent,v0.23 controlled-fault reconciliation,synthetic data
+raw_revenue_overstatement_max,10.9569,percent,v0.23 controlled-fault reconciliation,synthetic data
+conversion_from_first_open,16.1663,percent,v0.23 metric contract,denominator is first_open
+conversion_from_trial_start,48.5473,percent,v0.23 metric contract,denominator is trial_start
+dau_forecasts_approved,3,count,v0.23 mature-window forecast evaluation,planning gate only
+revenue_subscription_forecasts_withheld,6,count,v0.23 mature-window forecast evaluation,planning gate only
+dau_mape_min,9.0873,percent,v0.23 28-point holdout,seasonal-naive baseline
+dau_mape_max,12.4581,percent,v0.23 28-point holdout,seasonal-naive baseline
+revenue_subscription_mape_min,25.5931,percent,v0.23 28-point holdout,seasonal-naive baseline
+revenue_subscription_mape_max,37.3253,percent,v0.23 28-point holdout,seasonal-naive baseline
+manifest_artifacts,10,count,v0.23 portable reference evidence,SHA-256 integrity manifest
