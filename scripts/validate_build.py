@@ -19,6 +19,7 @@ EXPECTED_PORTABLE_ARTIFACTS = {
     "forecast_evaluations.csv",
     "quality_report.json",
     "metric_contracts.json",
+    "event_contract.json",
     "reference_summary.json",
     "MANIFEST.json",
 }
@@ -65,6 +66,13 @@ def validate_build(root: Path) -> list[str]:
     required_contracts = {"paid_conversion_from_first_open", "paid_conversion_from_trial_start"}
     if names != required_contracts:
         failures.append("metric_contract_set")
+
+    event = json.loads((root / "event_contract.json").read_text(encoding="utf-8"))
+    if set(event["allowed_products"]) != expected_products:
+        failures.append("event_contract_products")
+    required_event_types = {"first_open", "trial_start", "paid_subscription", "purchase"}
+    if set(event["allowed_event_types"]) != required_event_types:
+        failures.append("event_contract_event_types")
 
     return failures
 
