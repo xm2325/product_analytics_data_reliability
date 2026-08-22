@@ -1,0 +1,3 @@
+design,treatment_share,total_users,higher_price_users,readout_days,es95_gbp_per_1000,unsafe_exposure_per_1000,tail_concentration,budget_status
+balanced_50_50,0.50,700,350,184,,, ,FAIL_AT_LEAST_ONE_BUDGET
+risk_aware_20_80,0.20,1094,219,270,1326,4.17,0.598,PASS_REFERENCE

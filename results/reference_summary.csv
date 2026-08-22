@@ -1,0 +1,14 @@
+claim,value,unit,context,interpretation_limit
+raw_revenue_overstatement_min,9.2,percent,controlled-fault reference run,synthetic data
+raw_revenue_overstatement_max,12.2,percent,controlled-fault reference run,synthetic data
+conversion_from_first_open,18.0,percent,versioned metric contract,denominator is first_open
+conversion_from_trial_start,56.6,percent,versioned metric contract,denominator is trial_start
+dau_forecasts_approved,3,count,rolling-origin reference evaluation,planning gate only
+revenue_subscription_forecasts_withheld,6,count,rolling-origin reference evaluation,planning gate only
+idempotent_backfill_second_run_delta,0.00,GBP,reference replay test,synthetic KPI correction
+risk_aware_treatment_share,20,percent,planning stress test,requires arm-variance validation
+risk_aware_total_users,1094,users,700 balanced-equivalent information units,equal-variance planning assumption
+risk_aware_higher_price_users,219,users,risk-aware planning candidate,not a production recommendation
+balanced_50_50_higher_price_users,350,users,comparable planned information,reference comparator
+higher_price_exposure_reduction,37.4,percent,219 versus 350,planning comparison
+risk_aware_readout,270,days,reference traffic/outcome assumptions,recompute for target product
