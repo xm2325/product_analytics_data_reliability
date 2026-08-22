@@ -28,10 +28,15 @@ def generate_events(
     products: Iterable[ProductConfig] = PRODUCTS,
     inject_faults: bool = True,
 ) -> pd.DataFrame:
-    """Generate a deterministic synthetic subscription-event stream.
+    """Generate a deterministic subscription + product-activity event stream.
 
-    Fault injection deliberately adds duplicate purchase events and a small
-    number of malformed identity rows so validation behaviour can be tested.
+    Each acquired user emits `first_open` and an explicit `app_open` on day 0.
+    Later `app_open` events are generated from a product-specific decaying
+    return probability for up to `activity_horizon_days`. This makes active-use
+    metrics distinct from commercial funnel events.
+
+    Fault injection deliberately adds duplicate purchase events and malformed
+    identity rows so validation behaviour can be tested.
     """
     rng = np.random.default_rng(seed)
     start = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -66,6 +71,23 @@ def generate_events(
                     )
 
                 add("first_open", base_ts)
+                add("app_open", base_ts + timedelta(minutes=1))
+
+                # One binary daily-return opportunity per user/day is enough to
+                # create a clear activity signal without pretending to model
+                # session frequency. Day 0 activity is guaranteed above.
+                for lag in range(1, product.activity_horizon_days + 1):
+                    return_probability = product.activity_floor + product.activity_peak * np.exp(
+                        -lag / product.activity_decay_days
+                    )
+                    return_probability = float(np.clip(return_probability, 0.0, 1.0))
+                    if rng.random() < return_probability:
+                        activity_ts = start + timedelta(
+                            days=day + lag,
+                            minutes=int(rng.integers(0, 1440)),
+                        )
+                        add("app_open", activity_ts)
+
                 if rng.random() < product.trial_rate:
                     trial_ts = base_ts + timedelta(hours=int(rng.integers(1, 36)))
                     add("trial_start", trial_ts)
