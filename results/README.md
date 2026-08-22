@@ -4,9 +4,11 @@ This directory contains two different evidence classes.
 
 ## `reference_summary.csv`
 
-A pinned summary of the current **v0.24** deterministic reference run (`seed=2206`, `days=120`). The values were reproduced by GitHub Actions after the explicit `app_open`, DAU migration and retention upgrades.
+A pinned summary of the current **v0.25** deterministic reference run (`seed=2206`, `days=120`). The values were reproduced by GitHub Actions after the retention-maturity and look-ahead safeguards were added.
 
-The authoritative full build is the generated `reference-evidence` workflow artifact, which includes the full CSV/JSON evidence set, `workbench.duckdb`, and `MANIFEST.json`.
+The authoritative full build is the generated `reference-evidence` workflow artifact. It includes the full CSV/JSON evidence set, `workbench.duckdb`, and `MANIFEST.json`.
+
+v0.25 reports activity retention only from cohorts whose target date is on or before the declared `analysis_as_of`. The separate maturity outputs show how many users are currently eligible versus excluded because their D7/D30 horizon has not matured yet.
 
 ## `risk_aware_design.csv`
 
