@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from datetime import timedelta
 
 import numpy as np
 import pandas as pd
@@ -79,7 +80,7 @@ def watermark_event_date(
     policy: LateArrivalPolicy = DEFAULT_LATE_ARRIVAL_POLICY,
 ):
     as_of = _utc_timestamp(processing_as_of)
-    lateness = pd.Timedelta(seconds=int(round(policy.allowed_lateness_hours * 3600.0)))
+    lateness = timedelta(seconds=int(round(policy.allowed_lateness_hours * 3600.0)))
     return (as_of - lateness).date()
 
 
