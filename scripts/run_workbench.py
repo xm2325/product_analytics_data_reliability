@@ -8,6 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 from product_analytics.config import PRODUCTS
+from product_analytics.contracts import event_contract
 from product_analytics.forecasting import evaluate_forecast, seasonal_naive
 from product_analytics.generator import generate_events
 from product_analytics.metrics import metric_contract_records, portfolio_conversion
@@ -70,9 +71,13 @@ def main() -> None:
     _write_json(quality_path, quality)
     outputs.append(quality_path)
 
-    contracts_path = out / "metric_contracts.json"
-    _write_json(contracts_path, metric_contract_records())
-    outputs.append(contracts_path)
+    metric_contracts_path = out / "metric_contracts.json"
+    _write_json(metric_contracts_path, metric_contract_records())
+    outputs.append(metric_contracts_path)
+
+    event_contract_path = out / "event_contract.json"
+    _write_json(event_contract_path, event_contract())
+    outputs.append(event_contract_path)
 
     summary = {
         "version": VERSION,
