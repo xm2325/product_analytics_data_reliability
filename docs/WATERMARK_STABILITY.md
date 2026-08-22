@@ -1,6 +1,6 @@
 # Rolling watermark stability
 
-v0.28 asks whether a watermark selected from one processing snapshot remains acceptable when the reporting date moves through time.
+v0.28 asks whether a watermark selected from one processing snapshot remains acceptable when the reporting date moves through time. v0.29 keeps that descriptive backtest intact and adds a separate statistical certification layer.
 
 ## Why this exists
 
@@ -10,7 +10,7 @@ The rolling backtest therefore replays the unchanged 24/48/72/96-hour candidate 
 
 ## Non-negotiable decision rules
 
-The backtest does not introduce a weighted objective. A candidate is feasible in a window only if all of the following pass:
+A candidate is point-estimate feasible in a window only if all of the following pass:
 
 ```text
 late-event fraction <= 0.50%
@@ -19,13 +19,9 @@ max |revenue revision| <= £10
 max |paid-subscription revision| <= 1
 ```
 
-A candidate is called **stable** only if it is feasible in every declared window. The stable SLA is the shortest stable candidate.
+A candidate is called **observed stable** only if it is feasible in every declared window. The observed-stability policy is the shortest such candidate. The budget is frozen before inspecting the rolling outcome.
 
-The budget is frozen before inspecting the rolling outcome.
-
-## Reference windows
-
-The deterministic reference evaluates:
+## Reference windows and observed result
 
 ```text
 2026-03-05
@@ -39,45 +35,56 @@ The deterministic reference evaluates:
 2026-04-30
 ```
 
-The per-window shortest feasible policies are:
+Per-window shortest feasible policies:
 
 ```text
 72h, 72h, 72h, 96h, 48h, 48h, 48h, 48h, 48h
 ```
 
-This sequence is itself useful evidence: the final five snapshots would make a 48-hour policy look consistently acceptable, but earlier windows show that conclusion is not stable over the full declared period.
-
-## Candidate stability
-
-| Candidate | Feasible windows | Selected windows | Feasibility rate | Stable? |
+| Candidate | Feasible windows | Selected windows | Feasibility rate | Observed stable? |
 |---|---:|---:|---:|---|
 | 24h | 0 | 0 | 0.0% | No |
 | 48h | 5 | 5 | 55.6% | No |
 | 72h | 8 | 3 | 88.9% | No |
 | 96h | 9 | 1 | 100% | Yes |
 
-The difference between `feasible_windows` and `selected_windows` is intentional. A candidate may satisfy every constraint in a window but still not be selected because a shorter candidate is also feasible.
-
-## Failure modes by candidate
-
-**24h** is structurally too aggressive for this synthetic delay process. It fails all nine windows and reaches a worst late-event rate of about 6.95%, a worst revised-cell fraction of 1.94%, and a worst revenue revision of £23.98.
-
-**48h** looks good at Apr-30 but fails four of nine windows. Across the rolling period its worst revised-cell fraction is 1.288% and its worst revenue revision is £11.99, crossing two different hard constraints.
-
-**72h** is much more stable, passing eight of nine windows. Its remaining failure is still real: the maximum observed revenue revision is £11.99, above the unchanged £10 budget.
-
-**96h** passes all nine windows. Its worst revised-cell fraction is about 0.300% and no revenue or paid-subscription revision breaches are observed in the declared backtest.
-
-## Decision
+The point-estimate observed-stability result is therefore:
 
 ```text
-selected stable SLA = 96h
+selected observed-stable SLA = 96h
 ```
 
-This is not a claim that four days is universally optimal. It means that, among the four predeclared candidates and under the predeclared synthetic risk budget, 96h is the shortest candidate with 9/9 historical feasibility in this reference study.
+This remains a valid descriptive statement in v0.29.
 
-## Important boundary
+## v0.29: observed stable does not mean certified
 
-The rolling backtest is evidence about **observed stability**, not statistical certainty. It does not yet account for binomial/proportion uncertainty, sparse-tail uncertainty, or uncertainty in the maximum-revision metrics.
+v0.29 adds one-sided simultaneous upper confidence bounds to the two proportional constraints. The full policy-selection family contains 72 bounds: four candidates × nine windows × two proportions. A 95% family-wise Bonferroni correction is applied.
 
-For that reason v0.28 does not use language such as “95% certain that 96h is safe.” The next release should add an explicit uncertainty-aware certification layer and be willing to return `insufficient_evidence` or `no_candidate_certified` rather than converting a point estimate into an unwarranted probability statement.
+The result is stricter than the point-estimate backtest:
+
+| Candidate | Observed feasible windows | Statistically certified windows |
+|---|---:|---:|
+| 24h | 0 / 9 | 0 / 9 |
+| 48h | 5 / 9 | 0 / 9 |
+| 72h | 8 / 9 | 0 / 9 |
+| 96h | **9 / 9** | **0 / 9** |
+
+For 96h, the worst observed late-event fraction is 0.4864%, but the worst simultaneous upper bound is about **0.5485%**, above the 0.50% budget. Its worst observed revised-cell fraction is 0.3003%, while the worst simultaneous upper bound is about **1.7385%**, above the 1.00% budget.
+
+Therefore the current evidence hierarchy is:
+
+```text
+48h = Apr-30 local point-estimate optimum
+96h = observed rolling-stable policy
+none = statistically certified family-wise 95% policy under v0.29
+```
+
+The project does not reinterpret the uncertified result as evidence that 96h is unsafe. It says the present evidence is insufficient for the stronger certification claim.
+
+## Why the negative result is retained
+
+The v0.29 method does not react by lowering the confidence level, shrinking the multiple-comparison family or loosening the risk budget. Those choices would be post-hoc responses to an inconvenient result.
+
+Instead, `watermark_stability_decision.json` continues to preserve the descriptive v0.28 decision, while `watermark_certification_decision.json` separately reports `no_candidate_certified_familywise_95`.
+
+See [`WATERMARK_UNCERTAINTY.md`](WATERMARK_UNCERTAINTY.md) for the statistical contract and model boundary.
