@@ -11,25 +11,15 @@ from product_analytics.provenance import validate_manifest
 
 
 EXPECTED_PORTABLE_ARTIFACTS = {
-    "bronze_events.csv",
-    "rejected_events.csv",
-    "silver_events.csv",
-    "gold_daily_metrics.csv",
-    "revenue_reconciliation.csv",
-    "product_config.csv",
-    "forecast_evaluations.csv",
-    "dau_definition_migration.csv",
-    "dau_definition_migration_summary.csv",
-    "retention_maturity_ledger.csv",
-    "retention_maturity_summary.csv",
-    "activity_retention_cohorts.csv",
-    "activity_retention_summary.csv",
-    "quality_report.json",
-    "metric_contracts.json",
-    "retention_contracts.json",
-    "event_contract.json",
-    "reference_summary.json",
-    "MANIFEST.json",
+    "bronze_events.csv", "rejected_events.csv", "silver_events.csv", "gold_daily_metrics.csv",
+    "revenue_reconciliation.csv", "product_config.csv", "forecast_evaluations.csv",
+    "dau_definition_migration.csv", "dau_definition_migration_summary.csv",
+    "retention_maturity_ledger.csv", "retention_maturity_summary.csv",
+    "activity_retention_cohorts.csv", "activity_retention_summary.csv",
+    "late_arrival_summary.csv", "watermark_late_events.csv",
+    "watermark_metric_revisions.csv", "watermark_revision_summary.csv",
+    "quality_report.json", "metric_contracts.json", "retention_contracts.json",
+    "event_contract.json", "late_arrival_contract.json", "reference_summary.json", "MANIFEST.json",
 }
 
 
@@ -41,13 +31,17 @@ def validate_build(root: Path) -> list[str]:
         return failures
 
     failures.extend(validate_manifest(root / "MANIFEST.json", root=root))
-
     expected_products = {p.name for p in PRODUCTS}
+
     quality = json.loads((root / "quality_report.json").read_text(encoding="utf-8"))
     if quality["rows_raw"] != quality["rows_certified"] + quality["rows_rejected"]:
         failures.append("row_accounting")
     if quality["rows_rejected"] <= 0:
         failures.append("no_controlled_faults_rejected")
+    if quality.get("invalid_ingestion_timestamp_rows") != 0:
+        failures.append("generated_invalid_ingestion_timestamp")
+    if quality.get("ingestion_before_event_rows") != 0:
+        failures.append("generated_ingestion_before_event")
 
     rejected = pd.read_csv(root / "rejected_events.csv")
     if len(rejected) != quality["rows_rejected"]:
@@ -58,6 +52,15 @@ def validate_build(root: Path) -> list[str]:
     silver = pd.read_csv(root / "silver_events.csv")
     if "app_open" not in set(silver["event_type"]):
         failures.append("no_app_open_activity")
+    if "ingested_at" not in silver.columns:
+        failures.append("missing_processing_time")
+    else:
+        event_ts = pd.to_datetime(silver["event_ts"], utc=True, errors="coerce")
+        ingested_at = pd.to_datetime(silver["ingested_at"], utc=True, errors="coerce")
+        if event_ts.isna().any() or ingested_at.isna().any():
+            failures.append("unparseable_certified_processing_time")
+        elif ingested_at.lt(event_ts).any():
+            failures.append("certified_processing_time_before_event")
 
     reconciliation = pd.read_csv(root / "revenue_reconciliation.csv")
     if set(reconciliation["product"]) != expected_products:
@@ -76,10 +79,8 @@ def validate_build(root: Path) -> list[str]:
     contracts = json.loads((root / "metric_contracts.json").read_text(encoding="utf-8"))
     names = {row["name"] for row in contracts}
     required_contracts = {
-        "daily_active_users",
-        "daily_active_users_legacy_any_event",
-        "paid_conversion_from_first_open",
-        "paid_conversion_from_trial_start",
+        "daily_active_users", "daily_active_users_legacy_any_event",
+        "paid_conversion_from_first_open", "paid_conversion_from_trial_start",
     }
     if names != required_contracts:
         failures.append("metric_contract_set")
@@ -106,6 +107,8 @@ def validate_build(root: Path) -> list[str]:
         failures.append("event_contract_event_types")
     if event.get("activity_event") != "app_open":
         failures.append("event_contract_activity_event")
+    if event.get("generated_processing_time_column") != "ingested_at":
+        failures.append("event_contract_processing_time")
 
     migration = pd.read_csv(root / "dau_definition_migration.csv")
     if set(migration["product"]) != expected_products:
@@ -122,10 +125,8 @@ def validate_build(root: Path) -> list[str]:
         failures.append("nonpositive_dau_v2")
 
     maturity = pd.read_csv(root / "retention_maturity_ledger.csv")
-    if set(maturity["product"]) != expected_products:
-        failures.append("maturity_product_set")
-    if set(maturity["horizon_days"]) != {7, 30}:
-        failures.append("maturity_horizon_set")
+    if set(maturity["product"]) != expected_products or set(maturity["horizon_days"]) != {7, 30}:
+        failures.append("maturity_product_or_horizon_set")
     maturity["mature"] = maturity["mature"].astype(str).str.lower().eq("true")
     mature = maturity.loc[maturity["mature"]].copy()
     immature = maturity.loc[~maturity["mature"]].copy()
@@ -163,15 +164,62 @@ def validate_build(root: Path) -> list[str]:
     if len(retention_cohorts) != len(mature):
         failures.append("retention_cohorts_not_mature_subset")
     retention = pd.read_csv(root / "activity_retention_summary.csv")
-    if set(retention["product"]) != expected_products:
-        failures.append("retention_product_set")
-    if set(retention["horizon_days"]) != {7, 30} or len(retention) != len(PRODUCTS) * 2:
-        failures.append("retention_horizon_set")
+    if set(retention["product"]) != expected_products or set(retention["horizon_days"]) != {7, 30}:
+        failures.append("retention_product_or_horizon_set")
     if not retention["retention_rate"].between(0, 1).all():
         failures.append("retention_rate_bounds")
     pivot = retention.pivot(index="product", columns="horizon_days", values="retention_rate")
     if not (pivot[30] < pivot[7]).all():
         failures.append("retention_decay_not_visible")
+
+    # v0.26 processing-time and watermark evidence.
+    arrival = pd.read_csv(root / "late_arrival_summary.csv")
+    if set(arrival["product"]) != expected_products:
+        failures.append("late_arrival_product_set")
+    if int(arrival["events"].sum()) != len(silver):
+        failures.append("late_arrival_row_accounting")
+    if int(arrival["late_beyond_watermark"].sum()) <= 0:
+        failures.append("no_controlled_late_arrivals")
+    if not arrival["late_fraction"].between(0, 1).all():
+        failures.append("late_fraction_bounds")
+    if arrival["delay_max_hours"].max() <= 48.0:
+        failures.append("late_tail_missing")
+
+    late_contract = json.loads((root / "late_arrival_contract.json").read_text(encoding="utf-8"))
+    if float(late_contract.get("allowed_lateness_hours", -1)) != 48.0:
+        failures.append("watermark_contract_hours")
+    if late_contract.get("event_time_field") != "event_ts" or late_contract.get("processing_time_field") != "ingested_at":
+        failures.append("watermark_contract_fields")
+
+    late_events = pd.read_csv(root / "watermark_late_events.csv")
+    if late_events.empty:
+        failures.append("no_late_events_missing_from_finalized_snapshot")
+    else:
+        event_date = pd.to_datetime(late_events["event_date"])
+        watermark_date = pd.to_datetime(late_events["watermark_event_date"])
+        ingested = pd.to_datetime(late_events["ingested_at"], utc=True)
+        processing_as_of = pd.to_datetime(late_events["processing_as_of"], utc=True)
+        if not event_date.le(watermark_date).all():
+            failures.append("late_event_after_watermark_date")
+        if not ingested.gt(processing_as_of).all():
+            failures.append("late_event_was_already_available")
+        if late_events["event_id"].duplicated().any():
+            failures.append("late_event_duplicate_id")
+
+    revisions = pd.read_csv(root / "watermark_metric_revisions.csv")
+    if set(revisions["product"]) != expected_products or set(revisions["metric"]) != {"dau", "revenue_gbp", "paid_subscription"}:
+        failures.append("revision_product_or_metric_set")
+    if (revisions["revision"] < -1e-12).any():
+        failures.append("late_arrival_negative_revision")
+    changed = revisions["changed_after_watermark"].astype(str).str.lower().eq("true")
+    if not changed.any():
+        failures.append("watermark_never_revises_metric")
+
+    revision_summary = pd.read_csv(root / "watermark_revision_summary.csv")
+    if len(revision_summary) != len(PRODUCTS) * 3:
+        failures.append("revision_summary_row_count")
+    if revision_summary["revised_dates"].sum() <= 0:
+        failures.append("revision_summary_no_changed_dates")
 
     config = pd.read_csv(root / "product_config.csv")
     if set(config["name"]) != expected_products:
