@@ -72,6 +72,9 @@ def test_sql_gold_matches_python_gold():
     sql_gold = sql_gold[columns].copy()
     python_gold["date"] = python_gold["date"].astype(str)
     sql_gold["date"] = sql_gold["date"].astype(str)
+    for column in ["dau_definition_delta_pct", "conversion_first_open", "conversion_trial_start"]:
+        python_gold[column] = pd.to_numeric(python_gold[column], errors="coerce").astype(float)
+        sql_gold[column] = pd.to_numeric(sql_gold[column], errors="coerce").astype(float)
     python_gold = python_gold.sort_values(["product", "date"]).reset_index(drop=True)
     sql_gold = sql_gold.sort_values(["product", "date"]).reset_index(drop=True)
 
@@ -130,6 +133,9 @@ def test_sql_retention_maturity_matches_python_ledger():
     for column in ["cohort_date", "target_date", "analysis_as_of"]:
         python_ledger[column] = python_ledger[column].astype(str)
         sql_ledger[column] = sql_ledger[column].astype(str)
+    for column in ["retained_users", "retention_rate"]:
+        python_ledger[column] = pd.to_numeric(python_ledger[column], errors="coerce").astype(float)
+        sql_ledger[column] = pd.to_numeric(sql_ledger[column], errors="coerce").astype(float)
     python_ledger = python_ledger.sort_values(["product", "horizon_days", "cohort_date"]).reset_index(drop=True)
     sql_ledger = sql_ledger.sort_values(["product", "horizon_days", "cohort_date"]).reset_index(drop=True)
 
