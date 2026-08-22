@@ -10,6 +10,14 @@ import pandas as pd
 from product_analytics.config import PRODUCTS
 from product_analytics.contracts import event_contract
 from product_analytics.forecasting import evaluate_forecast, mature_metric_history, seasonal_naive
+from product_analytics.freshness import (
+    DEFAULT_LATE_ARRIVAL_POLICY,
+    late_after_watermark_snapshot,
+    late_arrival_contract,
+    late_arrival_summary,
+    metric_revision_report,
+    revision_summary,
+)
 from product_analytics.generator import generate_events, product_config_frame
 from product_analytics.metrics import (
     activity_retention,
@@ -25,7 +33,7 @@ from product_analytics.pipeline import run_pipeline
 from product_analytics.provenance import write_manifest
 
 
-VERSION = "0.25.0"
+VERSION = "0.26.0"
 
 
 def _write_json(path: Path, payload: object) -> None:
@@ -81,9 +89,9 @@ def main() -> None:
         frame.to_csv(path, index=False)
         outputs.append(path)
 
-    # The last first_open date is the common reporting boundary. It prevents
-    # simulator-generated follow-up after that date from leaking into either
-    # forecast validation or retention cohorts that have not matured yet.
+    # The final first_open date is the shared event-time reporting boundary for
+    # forecast and retention. Processing-time freshness uses the end of that
+    # same calendar day, avoiding a hidden second reporting horizon.
     forecast_rows = []
     analysis_as_of_by_product: dict[str, object] = {}
     mature_gold_parts: list[pd.DataFrame] = []
@@ -105,12 +113,13 @@ def main() -> None:
     mature_gold = pd.concat(mature_gold_parts, ignore_index=True)
     migration = dau_definition_migration(mature_gold)
     migration_summary = _migration_summary(migration)
-    migration_path = out / "dau_definition_migration.csv"
-    migration.to_csv(migration_path, index=False)
-    outputs.append(migration_path)
-    migration_summary_path = out / "dau_definition_migration_summary.csv"
-    migration_summary.to_csv(migration_summary_path, index=False)
-    outputs.append(migration_summary_path)
+    for name, frame in {
+        "dau_definition_migration.csv": migration,
+        "dau_definition_migration_summary.csv": migration_summary,
+    }.items():
+        path = out / name
+        frame.to_csv(path, index=False)
+        outputs.append(path)
 
     maturity_ledger = retention_maturity_ledger(
         silver,
@@ -124,12 +133,35 @@ def main() -> None:
         observation_end_by_product=analysis_as_of_by_product,
     )
     retention_overall = retention_summary(retention)
-
     for name, frame in {
         "retention_maturity_ledger.csv": maturity_ledger,
         "retention_maturity_summary.csv": maturity_summary,
         "activity_retention_cohorts.csv": retention,
         "activity_retention_summary.csv": retention_overall,
+    }.items():
+        path = out / name
+        frame.to_csv(path, index=False)
+        outputs.append(path)
+
+    reporting_date = max(pd.Timestamp(value).date() for value in analysis_as_of_by_product.values())
+    processing_as_of = pd.Timestamp(reporting_date, tz="UTC") + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
+    arrival_summary = late_arrival_summary(silver, DEFAULT_LATE_ARRIVAL_POLICY)
+    late_finalized_events = late_after_watermark_snapshot(
+        silver,
+        processing_as_of,
+        DEFAULT_LATE_ARRIVAL_POLICY,
+    )
+    revisions = metric_revision_report(
+        silver,
+        processing_as_of,
+        DEFAULT_LATE_ARRIVAL_POLICY,
+    )
+    revision_overall = revision_summary(revisions)
+    for name, frame in {
+        "late_arrival_summary.csv": arrival_summary,
+        "watermark_late_events.csv": late_finalized_events,
+        "watermark_metric_revisions.csv": revisions,
+        "watermark_revision_summary.csv": revision_overall,
     }.items():
         path = out / name
         frame.to_csv(path, index=False)
@@ -152,6 +184,11 @@ def main() -> None:
     _write_json(event_contract_path, event_contract())
     outputs.append(event_contract_path)
 
+    arrival_contract = late_arrival_contract(processing_as_of, DEFAULT_LATE_ARRIVAL_POLICY)
+    arrival_contract_path = out / "late_arrival_contract.json"
+    _write_json(arrival_contract_path, arrival_contract)
+    outputs.append(arrival_contract_path)
+
     maturity_summary_json = maturity_summary.copy()
     maturity_summary_json["analysis_as_of"] = maturity_summary_json["analysis_as_of"].astype(str)
     summary = {
@@ -172,14 +209,19 @@ def main() -> None:
         "dau_definition_migration": migration_summary.to_dict(orient="records"),
         "retention_maturity": maturity_summary_json.to_dict(orient="records"),
         "activity_retention": retention_overall.to_dict(orient="records"),
+        "processing_time": {
+            "contract": arrival_contract,
+            "late_beyond_watermark_events": int(arrival_summary["late_beyond_watermark"].sum()),
+            "late_missing_from_finalized_snapshot": int(len(late_finalized_events)),
+            "revised_finalized_metric_days": int(revisions["changed_after_watermark"].sum()),
+            "revision_summary": revision_overall.to_dict(orient="records"),
+        },
         "revenue_reconciliation": reconciliation.to_dict(orient="records"),
     }
     summary_path = out / "reference_summary.json"
     _write_json(summary_path, summary)
     outputs.append(summary_path)
 
-    # DuckDB is an operational convenience. The manifest focuses on portable
-    # tabular/JSON evidence so hashes are comparable across platforms.
     manifest = write_manifest(outputs, root=out, output=out / "MANIFEST.json")
     print(json.dumps({**summary, "manifest_artifacts": manifest["artifact_count"]}, indent=2))
 
