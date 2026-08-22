@@ -1,45 +1,73 @@
 # Reference and planning results
 
-This directory contains two evidence classes.
+This directory contains current deterministic reference evidence plus preserved historical planning context.
 
 ## `reference_summary.csv`
 
-A pinned summary of the current **v0.27** deterministic reference run (`seed=2206`, `days=120`). v0.27 preserves the v0.26 processing-time audit and adds a transparent finalization-SLA calibration over 24/48/72/96-hour watermark candidates.
+A pinned summary of the current **v0.28** deterministic reference (`seed=2206`, `days=120`). v0.28 preserves the commercial and metric truth of the earlier reference but tightens the watermark decision scope and adds a nine-window rolling SLA backtest.
 
 The authoritative full build is the generated `reference-evidence` GitHub Actions artifact. It contains the full CSV/JSON evidence set, `workbench.duckdb`, and `MANIFEST.json`.
 
-The current reference distinguishes:
+## Point-in-time calibration evidence
 
-- event time (`event_ts`) from processing time (`ingested_at`);
-- mature retention users from users whose D7/D30 horizon is not yet observable;
-- late rows from the smaller subset that actually revises a KPI cell;
-- a fixed watermark audit from a multi-candidate SLA decision.
+For each 24/48/72/96-hour candidate, the SLA late-event denominator now contains only events whose event date is on or before that candidate's watermark date. The whole settled-stream late rate remains diagnostic only.
 
-## Watermark calibration evidence
+At the final 2026-04-30 processing snapshot:
 
-The candidate policies are replayed against the same event stream and the same 2026-04-30 processing snapshot.
-
-| Candidate | Late-event fraction | Late events still missing from nominally-final dates | Revised KPI-cell fraction | Feasible? |
+| Candidate | Point-in-time late-event fraction | Late events still missing from nominally-final dates | Revised KPI-cell fraction | Feasible? |
 |---|---:|---:|---:|---|
-| 24h | **6.958%** | 62 | **1.214%** | No |
-| 48h | **0.496%** | 24 | **0.753%** | Yes |
-| 72h | **0.496%** | 11 | **0.380%** | Yes |
-| 96h | **0.482%** | 0 | **0.000%** | Yes |
+| 24h | **6.932%** | 62 | **1.214%** | No |
+| 48h | **0.4951%** | 24 | **0.753%** | Yes |
+| 72h | **0.4944%** | 11 | **0.380%** | Yes |
+| 96h | **0.4814%** | 0 | **0.000%** | Yes |
 
-The reference budget requires late events <=0.50%, revised finalized KPI cells <=1.00%, maximum absolute revenue revision <=£10, and maximum absolute paid-subscription revision <=1. The selector uses no weighted score: it chooses the **shortest candidate satisfying every hard constraint**. The resulting reference SLA is **48 hours**.
+The local Apr-30 selector therefore still chooses **48h** as the shortest feasible candidate.
 
-Generated decision evidence:
+Generated evidence:
 
 ```text
 watermark_policy_grid.csv
 watermark_policy_decision.json
 ```
 
-The CI path contains both a generic validator and a pinned deterministic-reference validator. If a future code/data change makes 24h feasible or 48h infeasible, the public 48h claim must be reviewed rather than silently drifting.
+## Rolling stability evidence
+
+The same candidate grid and unchanged hard budget are replayed over nine weekly processing snapshots.
+
+| Candidate | Feasible windows | Feasibility rate | Stable in every window? |
+|---|---:|---:|---|
+| 24h | 0 / 9 | 0.0% | No |
+| 48h | 5 / 9 | 55.6% | No |
+| 72h | 8 / 9 | 88.9% | No |
+| 96h | **9 / 9** | **100%** | **Yes** |
+
+The per-window shortest selection sequence is:
+
+```text
+72h, 72h, 72h, 96h, 48h, 48h, 48h, 48h, 48h
+```
+
+The strict stability selector chooses the shortest candidate feasible in **every** window, so the current robust reference policy is **96h**. The budget is not relaxed after seeing the result and no weighted score is used.
+
+Generated evidence:
+
+```text
+watermark_rolling_grid.csv
+watermark_rolling_windows.csv
+watermark_stability_summary.csv
+watermark_stability_decision.json
+```
+
+The distinction between the two decisions is intentional:
+
+```text
+48h = final-snapshot local optimum
+96h = rolling all-window stable SLA
+```
 
 ## Processing-time audit evidence
 
-The v0.26 row-level/metric-level audit remains part of the current build:
+The row-level/metric-level late-arrival audit remains part of the current build:
 
 ```text
 late_arrival_contract.json
@@ -57,16 +85,21 @@ Retention remains point-in-time. Only cohorts whose target date is on or before 
 
 ## `risk_aware_design.csv`
 
-A preserved planning snapshot from the broader pre-v0.23 unequal-randomisation study. The compact public package retains allocation/evidence-planning primitives but not the entire historical Monte Carlo portfolio-risk engine.
-
-Accordingly, this file is methodological context rather than a current-workflow regression target or production recommendation.
+A preserved planning snapshot from the broader pre-v0.23 unequal-randomisation study. It is methodological context rather than a current-workflow regression target or production recommendation.
 
 ## Reproduce the current reference
 
 ```bash
+make check
+```
+
+or run the validators separately:
+
+```bash
 make reference
-make validate
+python scripts/validate_build.py build/reference
+python scripts/validate_watermark_backtest.py build/reference
 python scripts/validate_reference_claims.py build/reference
 ```
 
-See `docs/REPRODUCIBILITY.md`, `docs/LATE_ARRIVAL_GOVERNANCE.md`, and `docs/WATERMARK_CALIBRATION.md` for the evidence contracts and interpretation boundaries.
+See `docs/REPRODUCIBILITY.md`, `docs/LATE_ARRIVAL_GOVERNANCE.md`, `docs/WATERMARK_CALIBRATION.md`, and `docs/WATERMARK_STABILITY.md` for evidence contracts and interpretation boundaries.
