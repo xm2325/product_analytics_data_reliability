@@ -4,84 +4,67 @@ This directory contains current deterministic reference evidence plus preserved 
 
 ## `reference_summary.csv`
 
-A pinned summary of the current **v0.28** deterministic reference (`seed=2206`, `days=120`). v0.28 preserves the commercial and metric truth of the earlier reference but tightens the watermark decision scope and adds a nine-window rolling SLA backtest.
-
-The authoritative full build is the generated `reference-evidence` GitHub Actions artifact. It contains the full CSV/JSON evidence set, `workbench.duckdb`, and `MANIFEST.json`.
-
-## Point-in-time calibration evidence
-
-For each 24/48/72/96-hour candidate, the SLA late-event denominator now contains only events whose event date is on or before that candidate's watermark date. The whole settled-stream late rate remains diagnostic only.
-
-At the final 2026-04-30 processing snapshot:
-
-| Candidate | Point-in-time late-event fraction | Late events still missing from nominally-final dates | Revised KPI-cell fraction | Feasible? |
-|---|---:|---:|---:|---|
-| 24h | **6.932%** | 62 | **1.214%** | No |
-| 48h | **0.4951%** | 24 | **0.753%** | Yes |
-| 72h | **0.4944%** | 11 | **0.380%** | Yes |
-| 96h | **0.4814%** | 0 | **0.000%** | Yes |
-
-The local Apr-30 selector therefore still chooses **48h** as the shortest feasible candidate.
-
-Generated evidence:
+A pinned summary of the current **v0.29** deterministic reference (`seed=2206`, `days=120`). The current freshness evidence deliberately reports three different decision strengths:
 
 ```text
-watermark_policy_grid.csv
-watermark_policy_decision.json
+48h = Apr-30 point-in-time local optimum
+96h = observed 9/9 rolling-stable policy
+none = family-wise 95% statistically certified policy under v0.29
 ```
 
-## Rolling stability evidence
+The authoritative full build is the generated `reference-evidence` GitHub Actions artifact. It contains the CSV/JSON evidence set, `workbench.duckdb`, and `MANIFEST.json`.
 
-The same candidate grid and unchanged hard budget are replayed over nine weekly processing snapshots.
+## Point-in-time calibration
 
-| Candidate | Feasible windows | Feasibility rate | Stable in every window? |
-|---|---:|---:|---|
-| 24h | 0 / 9 | 0.0% | No |
-| 48h | 5 / 9 | 55.6% | No |
-| 72h | 8 / 9 | 88.9% | No |
-| 96h | **9 / 9** | **100%** | **Yes** |
+For each 24/48/72/96-hour candidate, the late-event decision denominator contains only events whose event date is on or before that candidate's watermark date. At the final 2026-04-30 snapshot, 48h is the shortest candidate satisfying all four point-estimate hard constraints.
 
-The per-window shortest selection sequence is:
+## Rolling observed stability
+
+The same candidate grid and unchanged risk budget are replayed across nine weekly snapshots.
+
+| Candidate | Observed feasible windows | Observed stable? |
+|---|---:|---|
+| 24h | 0 / 9 | No |
+| 48h | 5 / 9 | No |
+| 72h | 8 / 9 | No |
+| 96h | **9 / 9** | **Yes** |
+
+The per-window shortest-feasible sequence is `72,72,72,96,48,48,48,48,48` hours. Under the declared all-window point-estimate rule, 96h is the observed-stable policy.
+
+## v0.29 uncertainty certification
+
+v0.29 adds one-sided exact Clopper–Pearson upper bounds to the late-event and revised-KPI-cell proportions. Because selection considers four candidates across nine windows and two proportional constraints, the full family contains **72 simultaneous bounds**. A 95% family-wise Bonferroni correction uses per-bound alpha `0.05 / 72 = 0.0006944444...`.
+
+| Candidate | Observed feasible windows | Certified windows | Worst late upper | Worst revised-cell upper |
+|---|---:|---:|---:|---:|
+| 24h | 0 / 9 | **0 / 9** | 7.1543% | 4.5588% |
+| 48h | 5 / 9 | **0 / 9** | 0.5601% | 3.5722% |
+| 72h | 8 / 9 | **0 / 9** | 0.5612% | 2.4904% |
+| 96h | 9 / 9 | **0 / 9** | **0.5485%** | **1.7385%** |
+
+The 96h point estimates are observed feasible in every window, but the simultaneous upper bounds exceed the 0.50% late-event and 1.00% revised-cell budgets. The statistical decision is therefore:
 
 ```text
-72h, 72h, 72h, 96h, 48h, 48h, 48h, 48h, 48h
+status = no_candidate_certified_familywise_95
+selected_lateness_hours = null
 ```
 
-The strict stability selector chooses the shortest candidate feasible in **every** window, so the current robust reference policy is **96h**. The budget is not relaxed after seeing the result and no weighted score is used.
+This is an insufficient-evidence result, not proof that the 96h policy is unsafe.
 
-Generated evidence:
+Maximum revenue and paid-subscription revisions remain deterministic hard gates; v0.29 does not fabricate confidence intervals for extreme-value statistics without a defensible tail model.
+
+Generated uncertainty evidence:
 
 ```text
-watermark_rolling_grid.csv
-watermark_rolling_windows.csv
-watermark_stability_summary.csv
-watermark_stability_decision.json
+watermark_uncertainty_grid.csv
+watermark_uncertainty_summary.csv
+watermark_uncertainty_contract.json
+watermark_certification_decision.json
 ```
 
-The distinction between the two decisions is intentional:
+## Earlier processing-time and retention evidence
 
-```text
-48h = final-snapshot local optimum
-96h = rolling all-window stable SLA
-```
-
-## Processing-time audit evidence
-
-The row-level/metric-level late-arrival audit remains part of the current build:
-
-```text
-late_arrival_contract.json
-late_arrival_summary.csv
-watermark_late_events.csv
-watermark_metric_revisions.csv
-watermark_revision_summary.csv
-```
-
-`watermark_late_events.csv` is row-level exception evidence. `watermark_metric_revisions.csv` compares point-in-time and settled KPI cells so a late row is not automatically equated with business impact.
-
-## Retention maturity evidence
-
-Retention remains point-in-time. Only cohorts whose target date is on or before the declared `analysis_as_of` enter D7/D30 denominators. The maturity outputs show eligible and excluded users explicitly rather than treating immature cohorts as churn.
+The row-level/metric-level late-arrival audit remains part of the current build, including late-event exceptions, settled-vs-snapshot KPI revisions and idempotent keyed backfill evidence. Retention also remains point-in-time: only cohorts whose target date is on or before `analysis_as_of` enter D7/D30 denominators.
 
 ## `risk_aware_design.csv`
 
@@ -93,13 +76,14 @@ A preserved planning snapshot from the broader pre-v0.23 unequal-randomisation s
 make check
 ```
 
-or run the validators separately:
+or run validators separately:
 
 ```bash
 make reference
 python scripts/validate_build.py build/reference
 python scripts/validate_watermark_backtest.py build/reference
+python scripts/validate_uncertainty_certification.py build/reference
 python scripts/validate_reference_claims.py build/reference
 ```
 
-See `docs/REPRODUCIBILITY.md`, `docs/LATE_ARRIVAL_GOVERNANCE.md`, `docs/WATERMARK_CALIBRATION.md`, and `docs/WATERMARK_STABILITY.md` for evidence contracts and interpretation boundaries.
+See `docs/WATERMARK_CALIBRATION.md`, `docs/WATERMARK_STABILITY.md`, `docs/WATERMARK_UNCERTAINTY.md`, `docs/LATE_ARRIVAL_GOVERNANCE.md`, and `docs/REPRODUCIBILITY.md`.
