@@ -39,9 +39,15 @@ from product_analytics.metrics import (
 )
 from product_analytics.pipeline import run_pipeline
 from product_analytics.provenance import write_manifest
+from product_analytics.uncertainty import (
+    DEFAULT_FAMILY_ALPHA,
+    select_certified_watermark_policy,
+    watermark_uncertainty_grid,
+    watermark_uncertainty_summary,
+)
 
 
-VERSION = "0.28.0"
+VERSION = "0.29.0"
 
 
 def _write_json(path: Path, payload: object) -> None:
@@ -178,9 +184,7 @@ def main() -> None:
         frame.to_csv(path, index=False)
         outputs.append(path)
 
-    # v0.28 corrects the decision denominator: candidate late-event fractions
-    # use only event dates already on/before that candidate watermark. A whole-
-    # stream late fraction remains in the grid as a non-decision diagnostic.
+    # Point-in-time candidate calibration using finalizable-event denominators.
     policy_grid = watermark_policy_grid(
         silver,
         processing_as_of,
@@ -196,8 +200,7 @@ def main() -> None:
     outputs.append(policy_decision_path)
 
     # Nine weekly snapshots ending at the current reporting snapshot. The same
-    # candidate set and risk budget is used in every window; the budget is never
-    # relaxed after observing instability.
+    # candidate set and risk budget is used in every window.
     rolling_snapshots = [
         processing_as_of - timedelta(days=7 * weeks_back)
         for weeks_back in range(8, -1, -1)
@@ -221,6 +224,33 @@ def main() -> None:
     stable_decision_path = out / "watermark_stability_decision.json"
     _write_json(stable_decision_path, stable_decision)
     outputs.append(stable_decision_path)
+
+    # v0.29 uncertainty-aware certification. All candidate-window proportion
+    # constraints participate in one 95% family-wise Bonferroni family.
+    # Maximum revenue/subscription revisions remain deterministic hard gates.
+    uncertainty_grid, uncertainty_contract = watermark_uncertainty_grid(
+        rolling_grid,
+        budget=DEFAULT_WATERMARK_RISK_BUDGET,
+        family_alpha=DEFAULT_FAMILY_ALPHA,
+    )
+    uncertainty_summary = watermark_uncertainty_summary(uncertainty_grid)
+    certification_decision = select_certified_watermark_policy(
+        uncertainty_summary,
+        uncertainty_contract,
+    )
+    for name, frame in {
+        "watermark_uncertainty_grid.csv": uncertainty_grid,
+        "watermark_uncertainty_summary.csv": uncertainty_summary,
+    }.items():
+        path = out / name
+        frame.to_csv(path, index=False)
+        outputs.append(path)
+    uncertainty_contract_path = out / "watermark_uncertainty_contract.json"
+    _write_json(uncertainty_contract_path, uncertainty_contract)
+    outputs.append(uncertainty_contract_path)
+    certification_decision_path = out / "watermark_certification_decision.json"
+    _write_json(certification_decision_path, certification_decision)
+    outputs.append(certification_decision_path)
 
     quality = asdict(result["quality_report"])
     quality_path = out / "quality_report.json"
@@ -277,6 +307,9 @@ def main() -> None:
             "rolling_backtest_windows": rolling_windows_json.to_dict(orient="records"),
             "watermark_stability_summary": stability.to_dict(orient="records"),
             "watermark_stability_decision": stable_decision,
+            "watermark_uncertainty_contract": uncertainty_contract,
+            "watermark_uncertainty_summary": uncertainty_summary.to_dict(orient="records"),
+            "watermark_certification_decision": certification_decision,
         },
         "revenue_reconciliation": reconciliation.to_dict(orient="records"),
     }
