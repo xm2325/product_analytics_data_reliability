@@ -1,4 +1,4 @@
-.PHONY: install reference validate validate-watermark validate-reference test check clean
+.PHONY: install reference validate validate-watermark validate-uncertainty validate-reference test check clean
 
 install:
 	python -m pip install -r requirements.txt
@@ -13,13 +13,16 @@ validate:
 validate-watermark:
 	python scripts/validate_watermark_backtest.py build/reference
 
+validate-uncertainty:
+	python scripts/validate_uncertainty_certification.py build/reference
+
 validate-reference:
 	python scripts/validate_reference_claims.py build/reference
 
 test:
 	pytest -q
 
-check: test reference validate validate-watermark validate-reference
+check: test reference validate validate-watermark validate-uncertainty validate-reference
 
 clean:
 	rm -rf build .pytest_cache
