@@ -16,7 +16,7 @@ REQUIRED_COLUMNS = {
     "revenue_gbp",
 }
 ALLOWED_PRODUCTS = {product.name for product in PRODUCTS}
-ALLOWED_EVENT_TYPES = {"first_open", "trial_start", "paid_subscription", "purchase"}
+ALLOWED_EVENT_TYPES = {"first_open", "app_open", "trial_start", "paid_subscription", "purchase"}
 
 
 @dataclass(frozen=True)

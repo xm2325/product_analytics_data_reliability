@@ -4,9 +4,9 @@ This directory contains two different evidence classes.
 
 ## `reference_summary.csv`
 
-A pinned summary of the current **v0.23** deterministic reference run (`seed=2206`, `days=120`). The values were reproduced by GitHub Actions after the v0.23 maturity-window and certification upgrades.
+A pinned summary of the current **v0.24** deterministic reference run (`seed=2206`, `days=120`). The values were reproduced by GitHub Actions after the explicit `app_open`, DAU migration and retention upgrades.
 
-The authoritative full build is still the generated `reference-evidence` workflow artifact, which includes CSV/JSON evidence, `workbench.duckdb`, and `MANIFEST.json`.
+The authoritative full build is the generated `reference-evidence` workflow artifact, which includes the full CSV/JSON evidence set, `workbench.duckdb`, and `MANIFEST.json`.
 
 ## `risk_aware_design.csv`
 

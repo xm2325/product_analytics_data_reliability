@@ -1,8 +1,8 @@
 # Results and interpretation
 
-This repository contains two deliberately separate evidence classes. All underlying data are synthetic.
+All data in this repository are synthetic. Current reproducible evidence is kept separate from preserved historical planning context.
 
-## A. Current v0.23 reproducible evidence
+## A. Current v0.24 reproducible evidence
 
 Run:
 
@@ -11,73 +11,92 @@ python scripts/run_workbench.py --output-dir build/reference
 python scripts/validate_build.py build/reference
 ```
 
-The current workflow regenerates raw Bronze events with controlled faults, certified Silver events, row-level rejects, Gold metrics, revenue reconciliation, forecast evaluations, machine-readable contracts and a SHA-256 manifest.
-
-The GitHub Actions reference run (`seed=2206`, `days=120`) verified:
+The GitHub Actions 120-day reference run (`seed=2206`) verified:
 
 | Evidence | Result |
 |---|---:|
-| Raw rows | 50,581 |
+| Raw rows | 276,249 |
 | Rejected rows | 589 |
-| Certified rows | 49,992 |
+| Certified rows | 275,660 |
 | Duplicate event rows | 489 |
 | Missing-identity rows | 101 |
 | Revenue overstatement | 9.13%–10.96% |
 | Paid / first-open | 16.17% |
 | Paid / trial-start | 48.55% |
-| DAU forecasts approved | 3 / 3 |
-| DAU MAPE | 9.1%–12.5% |
+| DAU v2 forecasts approved | 3 / 3 |
+| DAU v2 MAPE | 3.9%–5.9% |
 | Revenue/subscription forecasts withheld | 6 / 6 |
 | Revenue/subscription MAPE | 25.6%–37.3% |
-| Portable manifest artifacts | 10 |
+| Portable manifest artifacts | 15 |
 
-The validator checks semantic invariants rather than hard-coding these values as required outcomes. It requires complete row accounting, non-empty reject reasons, all configured products in reconciliation, the expected forecast/contract sets and matching hashes.
+The commercial conversion, revenue reconciliation and revenue/subscription forecast values are unchanged from v0.23. v0.24 intentionally uses a separate activity RNG stream, so adding `app_open` behaviour does not redraw the commercial funnel.
 
-### Data reliability interpretation
+### Data reliability
 
-Controlled duplicate purchase faults are intentionally visible in Bronze revenue. Certification removes them from Silver/Gold while retaining the rejected records. Product-level overstatement in this reference run was:
+Controlled duplicate purchase faults remain visible in Bronze revenue and are removed from certified Silver/Gold metrics while retaining rejected-row evidence.
 
-- `photo_editor`: **9.13%**;
+- `photo_editor`: **9.13%** raw revenue overstatement;
 - `notes_app`: **10.83%**;
 - `file_transfer`: **10.96%**.
 
-Reconciliation therefore answers both how much a raw KPI was distorted and which concrete rows explain the difference.
+### DAU definition migration
 
-### Metric semantics
+v0.24 introduces explicit active use:
 
-Two conversion contracts intentionally answer different questions:
+```text
+DAU v1 = unique users with any certified event       [deprecated]
+DAU v2 = unique users with app_open                  [current]
+```
 
-- paid users / first-open users: **16.17%**;
-- paid users / trial-start users: **48.55%**.
+The two definitions are calculated on the same certified events for 120 acquisition-window days.
 
-The difference is semantic rather than contradictory. The generated registry stores numerator, denominator, grain, unit and version.
+| Product | Mean DAU v2 | Mean DAU v1 | v1 relative overstatement | p95 daily delta |
+|---|---:|---:|---:|---:|
+| File Transfer | 387.2 | 407.7 | **5.27%** | 29.1 users |
+| Notes App | 733.2 | 749.4 | **2.21%** | 24.0 users |
+| Photo Editor | 584.9 | 610.4 | **4.35%** | 33.1 users |
 
-### Forecast governance and observation maturity
+This is large enough to matter operationally but not so large that it indicates a completely different product population. The dual-run makes the semantic impact visible before downstream consumers switch definitions.
 
-The first CI implementation evaluated the Gold table through its last recorded date. That was wrong for this simulator: acquisition stopped after day 120, while delayed trial/subscription/purchase events continued for several days. The resulting low-volume tail made all nine forecasts fail and pushed DAU MAPE to implausible levels.
+### Activity retention
 
-v0.23 now defines an explicit observation boundary at each product's final `first_open` date before forming the forecasting holdout. Delayed outcomes remain in historical metrics; only the artificial simulator-edge tail is excluded from forecast validation.
+A user is retained at horizon `h` when an `app_open` occurs exactly `h` calendar days after their first-open cohort date. Cohorts are used only after the horizon is mature.
 
-After that correction:
+| Product | Eligible users | D7 | D30 |
+|---|---:|---:|---:|
+| File Transfer | 10,023 | **19.60%** | **6.21%** |
+| Notes App | 9,168 | **38.17%** | **21.90%** |
+| Photo Editor | 10,989 | **26.74%** | **11.36%** |
 
-- `photo_editor` DAU MAPE: **9.09%**, approved;
-- `notes_app` DAU MAPE: **10.24%**, approved;
-- `file_transfer` DAU MAPE: **12.46%**, approved;
-- all six revenue / paid-subscription baselines remain above the 20% planning threshold (**25.6%–37.3%**) and are withheld.
+The D7→D30 decay is generated by the synthetic activity model; these are not external product benchmarks.
 
-The threshold was not relaxed to obtain this result; the evaluation window was corrected.
+### Forecast governance
+
+Forecast evaluation still applies the explicit final-`first_open` observation boundary before the 28-point holdout.
+
+With DAU v2 based on `app_open`:
+
+- `photo_editor`: **3.89% MAPE**, approved;
+- `notes_app`: **3.99%**, approved;
+- `file_transfer`: **5.92%**, approved.
+
+The six revenue / paid-subscription baselines remain at **25.6%–37.3% MAPE** and are withheld by the unchanged 20% planning gate.
+
+This separation is useful: adding a better-defined, smoother active-use metric improves the DAU forecast target without making volatile commercial outcomes look artificially forecastable.
+
+### Python / SQL parity
+
+v0.24 adds CI tests that execute `sql/silver_events.sql` and `sql/gold_daily_metrics.sql` in DuckDB and compare them with the Python certification/Gold implementations on the same controlled-fault data. This makes the SQL path a tested reference implementation rather than documentation-only code.
 
 ## B. Preserved planning snapshot
 
 `results/risk_aware_design.csv` retains the unequal-randomisation example from the broader pre-v0.23 decision-design study. The compact public package does **not** claim that the full historical Monte Carlo portfolio-risk analysis is regenerated by the current reference script.
-
-For that preserved planning comparison:
 
 | Design | Total users | Higher-price users | Approx. readout |
 |---|---:|---:|---:|
 | 50/50 | 700 | 350 | 184 d |
 | 20/80 candidate | 1,094 | 219 | 270 d |
 
-This is methodological context, not a production recommendation or current-workflow regression target. Arm-specific variance and realised traffic would need to be re-estimated before using an unequal allocation.
+This is methodological context, not a production recommendation or current-workflow regression target.
 
 See `docs/REPRODUCIBILITY.md` for the repository-wide provenance rule.
