@@ -29,3 +29,13 @@ jobs:
           ls -lh build/ci-reference
           cat build/ci-reference/quality_report.json
           cat build/ci-reference/MANIFEST.json
+      - name: Upload validated reference evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: reference-evidence
+          path: |
+            build/ci-reference/*.csv
+            build/ci-reference/*.json
+            build/ci-reference/*.duckdb
+          if-no-files-found: error
+          retention-days: 30
