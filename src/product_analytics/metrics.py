@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 import pandas as pd
 
@@ -11,17 +11,29 @@ class MetricContract:
     numerator: str
     denominator: str
     grain: str
+    unit: str = "ratio"
     version: str = "1.0"
 
 
 METRIC_CONTRACTS = {
     "paid_conversion_from_first_open": MetricContract(
-        "paid_conversion_from_first_open", "users with paid_subscription", "users with first_open", "product"
+        "paid_conversion_from_first_open",
+        "users with paid_subscription",
+        "users with first_open",
+        "product",
     ),
     "paid_conversion_from_trial_start": MetricContract(
-        "paid_conversion_from_trial_start", "users with paid_subscription", "users with trial_start", "product"
+        "paid_conversion_from_trial_start",
+        "users with paid_subscription",
+        "users with trial_start",
+        "product",
     ),
 }
+
+
+def metric_contract_records() -> list[dict[str, str]]:
+    """Return deterministic, machine-readable metric definitions."""
+    return [asdict(METRIC_CONTRACTS[name]) for name in sorted(METRIC_CONTRACTS)]
 
 
 def daily_metrics(events: pd.DataFrame) -> pd.DataFrame:
