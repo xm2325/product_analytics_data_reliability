@@ -152,6 +152,8 @@ def main() -> None:
     _write_json(event_contract_path, event_contract())
     outputs.append(event_contract_path)
 
+    maturity_summary_json = maturity_summary.copy()
+    maturity_summary_json["analysis_as_of"] = maturity_summary_json["analysis_as_of"].astype(str)
     summary = {
         "version": VERSION,
         "seed": args.seed,
@@ -168,7 +170,7 @@ def main() -> None:
             "withheld": int((~forecast_frame["approved"]).sum()),
         },
         "dau_definition_migration": migration_summary.to_dict(orient="records"),
-        "retention_maturity": maturity_summary.to_dict(orient="records"),
+        "retention_maturity": maturity_summary_json.to_dict(orient="records"),
         "activity_retention": retention_overall.to_dict(orient="records"),
         "revenue_reconciliation": reconciliation.to_dict(orient="records"),
     }
