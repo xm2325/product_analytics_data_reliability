@@ -33,8 +33,9 @@ def required_trials_for_exact_upper(
     planning rate is already at or above the risk limit, more evidence cannot
     solve the point-estimate problem and the function returns None.
 
-    The result is a planning threshold, not a guarantee that future data will
-    realise the assumed rate.
+    A None result can therefore mean either the planning rate itself is not
+    below the limit or no passing sample size was found up to max_trials. The
+    higher-level plan records those cases separately.
     """
     planning_rate = float(planning_rate)
     limit = float(limit)
@@ -55,7 +56,6 @@ def required_trials_for_exact_upper(
         x = _planned_successes(planning_rate, n)
         return exact_binomial_upper(x, n, alpha) <= limit
 
-    # Exponential search for a passing region.
     lo = 1
     hi = 1
     while hi < max_trials and not passes(hi):
@@ -64,9 +64,6 @@ def required_trials_for_exact_upper(
     if not passes(hi):
         return None
 
-    # Binary locate the first apparent crossing, then scan a discrete neighbourhood.
-    # ceil(p*n) produces small saw-tooth jumps, so a local exact scan avoids
-    # reporting a binary-search artefact as the planning threshold.
     left, right = lo, hi
     while left + 1 < right:
         mid = (left + right) // 2
@@ -75,6 +72,8 @@ def required_trials_for_exact_upper(
         else:
             left = mid
 
+    # ceil(p*n) introduces small saw-tooth jumps. Scan a neighbourhood around
+    # the apparent crossing so the reported threshold is not a binary artefact.
     period = int(ceil(1.0 / planning_rate)) if planning_rate > 0 else 1
     scan_start = max(1, right - max(5000, 4 * period))
     for n in range(scan_start, right + 1):
@@ -88,14 +87,15 @@ def certification_evidence_plan(
     *,
     family_alpha: float = DEFAULT_FAMILY_ALPHA,
     budget: WatermarkRiskBudget = DEFAULT_WATERMARK_RISK_BUDGET,
+    max_planning_trials: int = DEFAULT_MAX_PLANNING_TRIALS,
 ) -> tuple[pd.DataFrame, dict[str, object]]:
-    """Plan evidence depth without changing the existing certification budget.
+    """Plan evidence depth without changing the certification budget.
 
     For each candidate, use the worst observed rolling-window proportional rate
     as a prospective planning rate. A candidate is evidence-only addressable
-    only when both planning rates are below their limits and both deterministic
-    maximum-revision gates already pass. Otherwise the plan explicitly says
-    that more sample alone is not the remedy.
+    only when both planning rates are below their limits, both deterministic
+    maximum-revision gates pass, and both exact evidence requirements are
+    quantifiable inside the declared search cap.
     """
     required = {
         "window_index",
@@ -113,6 +113,8 @@ def certification_evidence_plan(
         raise ValueError(f"rolling_grid missing columns: {sorted(missing)}")
     if rolling_grid.empty:
         raise ValueError("rolling_grid must be non-empty")
+    if int(max_planning_trials) <= 0:
+        raise ValueError("max_planning_trials must be positive")
 
     candidate_count = int(rolling_grid["allowed_lateness_hours"].nunique())
     window_count = int(rolling_grid["window_index"].nunique())
@@ -131,16 +133,29 @@ def certification_evidence_plan(
         revenue_gate = max_revenue <= budget.max_abs_revenue_revision_gbp
         paid_gate = max_paid <= budget.max_abs_paid_subscription_revision
 
-        late_n = required_trials_for_exact_upper(
-            late_rate,
-            budget.max_late_event_fraction,
-            per_bound_alpha,
-        ) if late_rate_below else None
-        revision_n = required_trials_for_exact_upper(
-            revision_rate,
-            budget.max_revised_metric_cell_fraction,
-            per_bound_alpha,
-        ) if revision_rate_below else None
+        late_n = (
+            required_trials_for_exact_upper(
+                late_rate,
+                budget.max_late_event_fraction,
+                per_bound_alpha,
+                max_trials=max_planning_trials,
+            )
+            if late_rate_below
+            else None
+        )
+        revision_n = (
+            required_trials_for_exact_upper(
+                revision_rate,
+                budget.max_revised_metric_cell_fraction,
+                per_bound_alpha,
+                max_trials=max_planning_trials,
+            )
+            if revision_rate_below
+            else None
+        )
+        late_cap_exceeded = bool(late_rate_below and late_n is None)
+        revision_cap_exceeded = bool(revision_rate_below and revision_n is None)
+        evidence_requirement_quantified = bool(late_n is not None and revision_n is not None)
 
         finalizable_per_day = (
             part["finalizable_events"] / part["finalized_calendar_dates"].replace(0, pd.NA)
@@ -154,8 +169,10 @@ def certification_evidence_plan(
         late_days = None if late_n is None else int(ceil(late_n / median_event_throughput))
         revision_days = None if revision_n is None else int(ceil(revision_n / median_metric_throughput))
         evidence_days = None
+        evidence_years = None
         if late_days is not None and revision_days is not None:
             evidence_days = max(late_days, revision_days)
+            evidence_years = evidence_days / 365.25
 
         reasons: list[str] = []
         if not late_rate_below:
@@ -166,9 +183,22 @@ def certification_evidence_plan(
             reasons.append("observed revenue-revision hard gate breaches")
         if not paid_gate:
             reasons.append("observed paid-subscription hard gate breaches")
-        evidence_only_addressable = not reasons
+        if late_cap_exceeded:
+            reasons.append(f"late-event evidence requirement exceeds {int(max_planning_trials):,}-trial search cap")
+        if revision_cap_exceeded:
+            reasons.append(f"revised-cell evidence requirement exceeds {int(max_planning_trials):,}-trial search cap")
+
+        evidence_only_addressable = bool(
+            late_rate_below
+            and revision_rate_below
+            and revenue_gate
+            and paid_gate
+            and evidence_requirement_quantified
+        )
         if evidence_only_addressable:
-            reasons.append("point risks and deterministic maxima pass; certification gap is evidence depth under the stated planning rates")
+            reasons.append(
+                "point risks and deterministic maxima pass; certification gap is evidence depth under the stated planning rates"
+            )
 
         rows.append(
             {
@@ -183,18 +213,22 @@ def certification_evidence_plan(
                 "paid_hard_gate_passes": bool(paid_gate),
                 "required_late_event_trials": late_n,
                 "required_revised_metric_cells": revision_n,
+                "late_trial_requirement_exceeds_search_cap": late_cap_exceeded,
+                "revision_trial_requirement_exceeds_search_cap": revision_cap_exceeded,
+                "evidence_requirement_quantified": evidence_requirement_quantified,
                 "median_finalizable_events_per_day": median_event_throughput,
                 "median_metric_cells_per_day": median_metric_throughput,
                 "estimated_calendar_days_for_late_bound": late_days,
                 "estimated_calendar_days_for_revision_bound": revision_days,
                 "estimated_calendar_days_for_both_proportions": evidence_days,
-                "evidence_only_addressable": bool(evidence_only_addressable),
+                "estimated_calendar_years_for_both_proportions": evidence_years,
+                "evidence_only_addressable": evidence_only_addressable,
                 "planning_interpretation": "; ".join(reasons),
             }
         )
 
     contract = {
-        "version": "1.0",
+        "version": "1.1",
         "planning_rule": "use each candidate's worst observed rolling-window proportional rate; keep the v0.29 family-wise alpha allocation and original hard risk budget unchanged",
         "success_count_rule": "ceil(planning_rate * trials)",
         "family_alpha": float(family_alpha),
@@ -203,9 +237,12 @@ def certification_evidence_plan(
         "simultaneous_one_sided_bounds": simultaneous_bounds,
         "per_bound_alpha": per_bound_alpha,
         "proportion_bound": "one-sided Clopper-Pearson upper confidence bound",
-        "throughput_rule": "convert required trials to approximate calendar days using median observed candidate-specific evidence throughput",
+        "max_planning_trials": int(max_planning_trials),
+        "throughput_rule": "convert required trials to approximate calendar evidence depth using median observed candidate-specific evidence throughput",
+        "calendar_day_interpretation": "reported days are total prospective evidence depth under the stated planning rates and throughput, not a guarantee that waiting that many additional wall-clock days will certify the policy",
         "deterministic_gate_rule": "more proportional evidence cannot repair an already-breached revenue or paid-subscription maximum-revision hard gate",
         "rate_gate_rule": "if the worst observed planning rate is at or above its budget, more sample alone cannot make the asymptotic upper bound fall below that budget",
+        "search_cap_rule": "if a planning rate is below budget but no passing exact bound is found by max_planning_trials, report the requirement as above the search cap rather than as a structural rate breach",
         "planning_boundary": "sample-size calculations condition on future risk rates and evidence throughput remaining at the stated planning values; they are not guarantees of future certification",
         "budget": asdict(budget),
         "weighted_score_used": False,
@@ -220,6 +257,7 @@ def select_evidence_plan(plan: pd.DataFrame) -> dict[str, object]:
         "allowed_lateness_hours",
         "evidence_only_addressable",
         "estimated_calendar_days_for_both_proportions",
+        "estimated_calendar_years_for_both_proportions",
     }
     missing = required.difference(plan.columns)
     if missing:
@@ -229,7 +267,7 @@ def select_evidence_plan(plan: pd.DataFrame) -> dict[str, object]:
     )
     selected = None if eligible.empty else eligible.iloc[0]
     return {
-        "version": "1.0",
+        "version": "1.1",
         "selection_rule": "shortest candidate whose current certification gap can be addressed by additional proportional evidence alone under the unchanged hard gates",
         "weighted_score_used": False,
         "budget_relaxed_for_planning": False,
@@ -238,5 +276,8 @@ def select_evidence_plan(plan: pd.DataFrame) -> dict[str, object]:
         "estimated_calendar_days_for_both_proportions": None
         if selected is None
         else int(selected["estimated_calendar_days_for_both_proportions"]),
+        "estimated_calendar_years_for_both_proportions": None
+        if selected is None
+        else float(selected["estimated_calendar_years_for_both_proportions"]),
         "interpretation": None if selected is None else str(selected["planning_interpretation"]),
     }
