@@ -18,9 +18,14 @@ EXPECTED_PORTABLE_ARTIFACTS = {
     "activity_retention_cohorts.csv", "activity_retention_summary.csv",
     "late_arrival_summary.csv", "watermark_late_events.csv",
     "watermark_metric_revisions.csv", "watermark_revision_summary.csv",
+    "watermark_policy_grid.csv", "watermark_policy_decision.json",
     "quality_report.json", "metric_contracts.json", "retention_contracts.json",
     "event_contract.json", "late_arrival_contract.json", "reference_summary.json", "MANIFEST.json",
 }
+
+
+def _bool_series(values: pd.Series) -> pd.Series:
+    return values.astype(str).str.lower().eq("true")
 
 
 def validate_build(root: Path) -> list[str]:
@@ -127,7 +132,7 @@ def validate_build(root: Path) -> list[str]:
     maturity = pd.read_csv(root / "retention_maturity_ledger.csv")
     if set(maturity["product"]) != expected_products or set(maturity["horizon_days"]) != {7, 30}:
         failures.append("maturity_product_or_horizon_set")
-    maturity["mature"] = maturity["mature"].astype(str).str.lower().eq("true")
+    maturity["mature"] = _bool_series(maturity["mature"])
     mature = maturity.loc[maturity["mature"]].copy()
     immature = maturity.loc[~maturity["mature"]].copy()
     if mature.empty or immature.empty:
@@ -211,7 +216,7 @@ def validate_build(root: Path) -> list[str]:
         failures.append("revision_product_or_metric_set")
     if (revisions["revision"] < -1e-12).any():
         failures.append("late_arrival_negative_revision")
-    changed = revisions["changed_after_watermark"].astype(str).str.lower().eq("true")
+    changed = _bool_series(revisions["changed_after_watermark"])
     if not changed.any():
         failures.append("watermark_never_revises_metric")
 
@@ -220,6 +225,46 @@ def validate_build(root: Path) -> list[str]:
         failures.append("revision_summary_row_count")
     if revision_summary["revised_dates"].sum() <= 0:
         failures.append("revision_summary_no_changed_dates")
+
+    # v0.27: transparent SLA calibration. Candidate risk should improve or stay
+    # flat as the finalization lag grows, while the number of finalized dates
+    # cannot increase. The chosen policy must be the shortest feasible row.
+    policy_grid = pd.read_csv(root / "watermark_policy_grid.csv")
+    if set(policy_grid["allowed_lateness_hours"].astype(float)) != {24.0, 48.0, 72.0, 96.0}:
+        failures.append("watermark_candidate_set")
+    if len(policy_grid) != 4:
+        failures.append("watermark_candidate_row_count")
+    ordered = policy_grid.sort_values("allowed_lateness_hours").reset_index(drop=True)
+    if not ordered["late_event_fraction"].is_monotonic_decreasing:
+        failures.append("watermark_late_fraction_not_monotone")
+    if not ordered["finalized_calendar_dates"].is_monotonic_decreasing:
+        failures.append("watermark_finalized_dates_not_monotone")
+    if not ordered["revised_metric_cell_fraction"].between(0, 1).all():
+        failures.append("watermark_revision_fraction_bounds")
+    feasible = _bool_series(ordered["feasible"])
+    if not feasible.any():
+        failures.append("watermark_no_feasible_candidate")
+
+    decision = json.loads((root / "watermark_policy_decision.json").read_text(encoding="utf-8"))
+    if decision.get("weighted_score_used") is not False:
+        failures.append("watermark_weighted_score_used")
+    if decision.get("selection_rule") != "shortest candidate satisfying every hard risk constraint":
+        failures.append("watermark_selection_rule")
+    if decision.get("status") != "selected":
+        failures.append("watermark_decision_not_selected")
+    if feasible.any():
+        shortest_feasible = float(ordered.loc[feasible, "allowed_lateness_hours"].min())
+        if float(decision.get("selected_lateness_hours", -1)) != shortest_feasible:
+            failures.append("watermark_not_shortest_feasible")
+    budget = decision.get("budget", {})
+    required_budget_fields = {
+        "max_late_event_fraction",
+        "max_revised_metric_cell_fraction",
+        "max_abs_revenue_revision_gbp",
+        "max_abs_paid_subscription_revision",
+    }
+    if not required_budget_fields.issubset(budget):
+        failures.append("watermark_budget_contract")
 
     config = pd.read_csv(root / "product_config.csv")
     if set(config["name"]) != expected_products:
