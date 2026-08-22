@@ -4,24 +4,42 @@ This directory contains two evidence classes.
 
 ## `reference_summary.csv`
 
-A pinned summary of the current **v0.26** deterministic reference run (`seed=2206`, `days=120`). The current workflow adds processing-time and watermark evidence while preserving the v0.25 commercial, DAU and mature-retention truth.
+A pinned summary of the current **v0.27** deterministic reference run (`seed=2206`, `days=120`). v0.27 preserves the v0.26 processing-time audit and adds a transparent finalization-SLA calibration over 24/48/72/96-hour watermark candidates.
 
 The authoritative full build is the generated `reference-evidence` GitHub Actions artifact. It contains the full CSV/JSON evidence set, `workbench.duckdb`, and `MANIFEST.json`.
 
-The v0.26 reference distinguishes:
+The current reference distinguishes:
 
 - event time (`event_ts`) from processing time (`ingested_at`);
-- provisional dates from dates nominally final under the 48-hour watermark;
-- late events from the smaller subset that actually revise a KPI cell;
-- mature retention users from users excluded because D7/D30 has not matured yet.
+- mature retention users from users whose D7/D30 horizon is not yet observable;
+- late rows from the smaller subset that actually revises a KPI cell;
+- a fixed watermark audit from a multi-candidate SLA decision.
 
-The verified reference contains 1,367 events arriving more than 48 hours late (0.496% of certified rows). At the 2026-04-30 processing snapshot, 24 not-yet-ingested events belong to event dates already behind the watermark, and their later settlement changes eight product-date-metric cells.
+## Watermark calibration evidence
 
-The 48-hour watermark is a reference policy rather than a claim of an optimal SLA.
+The candidate policies are replayed against the same event stream and the same 2026-04-30 processing snapshot.
 
-## Processing-time evidence
+| Candidate | Late-event fraction | Late events still missing from nominally-final dates | Revised KPI-cell fraction | Feasible? |
+|---|---:|---:|---:|---|
+| 24h | **6.958%** | 62 | **1.214%** | No |
+| 48h | **0.496%** | 24 | **0.753%** | Yes |
+| 72h | **0.496%** | 11 | **0.380%** | Yes |
+| 96h | **0.482%** | 0 | **0.000%** | Yes |
 
-The generated reference includes:
+The reference budget requires late events <=0.50%, revised finalized KPI cells <=1.00%, maximum absolute revenue revision <=£10, and maximum absolute paid-subscription revision <=1. The selector uses no weighted score: it chooses the **shortest candidate satisfying every hard constraint**. The resulting reference SLA is **48 hours**.
+
+Generated decision evidence:
+
+```text
+watermark_policy_grid.csv
+watermark_policy_decision.json
+```
+
+The CI path contains both a generic validator and a pinned deterministic-reference validator. If a future code/data change makes 24h feasible or 48h infeasible, the public 48h claim must be reviewed rather than silently drifting.
+
+## Processing-time audit evidence
+
+The v0.26 row-level/metric-level audit remains part of the current build:
 
 ```text
 late_arrival_contract.json
@@ -48,6 +66,7 @@ Accordingly, this file is methodological context rather than a current-workflow 
 ```bash
 make reference
 make validate
+python scripts/validate_reference_claims.py build/reference
 ```
 
-See `docs/REPRODUCIBILITY.md` for the provenance rule and `docs/LATE_ARRIVAL_GOVERNANCE.md` for the processing-time contract.
+See `docs/REPRODUCIBILITY.md`, `docs/LATE_ARRIVAL_GOVERNANCE.md`, and `docs/WATERMARK_CALIBRATION.md` for the evidence contracts and interpretation boundaries.
