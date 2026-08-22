@@ -14,6 +14,10 @@ def test_pipeline_persists_auditable_tables(tmp_path):
 
     assert len(result["silver_events"]) + len(result["rejected_events"]) == len(raw)
     assert result["quality_report"].rows_rejected == len(result["rejected_events"])
+    assert "app_open" in set(result["silver_events"]["event_type"])
+    assert {"dau", "dau_legacy_any_event", "dau_definition_delta"}.issubset(
+        result["gold_daily_metrics"].columns
+    )
 
     con = duckdb.connect(str(database), read_only=True)
     try:
@@ -33,21 +37,31 @@ def test_pipeline_persists_auditable_tables(tmp_path):
 
 def test_event_contract_matches_current_config():
     contract = event_contract()
+    assert contract["version"] == "1.1"
+    assert contract["activity_event"] == "app_open"
     assert set(contract["allowed_products"]) == {product.name for product in PRODUCTS}
     assert set(contract["allowed_event_types"]) == {
         "first_open",
+        "app_open",
         "trial_start",
         "paid_subscription",
         "purchase",
     }
     assert "revenue_scope" in contract["rules"]
+    assert "active_use" in contract["rules"]
 
 
 def test_metric_contracts_are_versioned_and_distinct():
-    contracts = metric_contract_records()
-    assert {row["name"] for row in contracts} == {
+    contracts = {row["name"]: row for row in metric_contract_records()}
+    assert set(contracts) == {
+        "daily_active_users",
+        "daily_active_users_legacy_any_event",
         "paid_conversion_from_first_open",
         "paid_conversion_from_trial_start",
     }
-    assert all(row["version"] for row in contracts)
-    assert len({row["denominator"] for row in contracts}) == 2
+    assert contracts["daily_active_users"]["version"] == "2.0"
+    assert "deprecated" in contracts["daily_active_users_legacy_any_event"]["version"]
+    assert contracts["daily_active_users"]["numerator"] == "unique users with app_open"
+    assert contracts["paid_conversion_from_first_open"]["denominator"] != contracts[
+        "paid_conversion_from_trial_start"
+    ]["denominator"]
