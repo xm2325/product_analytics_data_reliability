@@ -4,8 +4,15 @@ import pandas as pd
 
 from product_analytics.config import ProductConfig
 from product_analytics.generator import generate_events
-from product_analytics.metrics import activity_retention, daily_metrics, dau_definition_migration, retention_summary
-from product_analytics.quality import certify_events
+from product_analytics.metrics import (
+    activity_retention,
+    daily_metrics,
+    dau_definition_migration,
+    retention_contract_records,
+    retention_maturity_ledger,
+    retention_maturity_summary,
+    retention_summary,
+)
 
 
 def _event(event_id, user_id, event_type, ts, revenue=0.0):
@@ -64,6 +71,66 @@ def test_activity_retention_uses_exact_return_horizons():
     assert summary.loc[7, "retention_rate"] == 1.0
     assert summary.loc[30, "eligible_users"] == 2
     assert summary.loc[30, "retention_rate"] == 0.5
+
+
+def test_immature_cohort_is_visible_but_future_return_is_not_used():
+    events = pd.DataFrame(
+        [
+            _event("e1", "u_old", "first_open", "2026-01-01 08:00"),
+            _event("e2", "u_old", "app_open", "2026-01-08 08:00"),
+            _event("e3", "u_new", "first_open", "2026-01-25 08:00"),
+            # This return exists in the source, but it is after analysis_as_of.
+            _event("e4", "u_new", "app_open", "2026-02-01 08:00"),
+        ]
+    )
+    ledger = retention_maturity_ledger(
+        events,
+        horizons=(7,),
+        observation_end_by_product={"notes_app": "2026-01-31"},
+    )
+    old = ledger.loc[ledger["cohort_date"].eq(pd.Timestamp("2026-01-01").date())].iloc[0]
+    new = ledger.loc[ledger["cohort_date"].eq(pd.Timestamp("2026-01-25").date())].iloc[0]
+
+    assert bool(old["mature"])
+    assert old["eligible_users"] == 1
+    assert old["retained_users"] == 1
+    assert not bool(new["mature"])
+    assert new["eligible_users"] == 0
+    assert new["excluded_users"] == 1
+    assert pd.isna(new["retained_users"])
+    assert pd.isna(new["retention_rate"])
+    assert new["exclusion_reason"] == "target_date_after_analysis_as_of"
+
+    cohorts = activity_retention(
+        events,
+        horizons=(7,),
+        observation_end_by_product={"notes_app": "2026-01-31"},
+    )
+    assert len(cohorts) == 1
+    assert cohorts.iloc[0]["eligible_users"] == 1
+
+
+def test_longer_retention_horizon_has_less_mature_evidence():
+    raw = generate_events(days=60, seed=37, inject_faults=False)
+    first_open = raw.loc[raw["event_type"].eq("first_open")].copy()
+    as_of = {
+        product: pd.to_datetime(frame["event_ts"], utc=True).dt.date.max()
+        for product, frame in first_open.groupby("product")
+    }
+    ledger = retention_maturity_ledger(raw, horizons=(7, 30), observation_end_by_product=as_of)
+    summary = retention_maturity_summary(ledger).pivot(
+        index="product", columns="horizon_days", values="eligible_user_fraction"
+    )
+    assert (summary[30] < summary[7]).all()
+
+
+def test_retention_contracts_make_maturity_denominator_explicit():
+    contracts = {row["name"]: row for row in retention_contract_records()}
+    assert set(contracts) == {"d7_activity_retention", "d30_activity_retention"}
+    assert contracts["d7_activity_retention"]["horizon_days"] == 7
+    assert contracts["d30_activity_retention"]["horizon_days"] == 30
+    assert all(row["return_window"] == "exact_calendar_day" for row in contracts.values())
+    assert all("analysis_as_of" in row["denominator"] for row in contracts.values())
 
 
 def test_activity_rng_does_not_change_commercial_funnel_stream():
