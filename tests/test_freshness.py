@@ -7,9 +7,12 @@ from product_analytics.freshness import (
     late_after_watermark_snapshot,
     late_arrival_summary,
     metric_revision_report,
+    rolling_watermark_backtest,
+    select_stable_watermark_policy,
     select_watermark_policy,
     watermark_event_date,
     watermark_policy_grid,
+    watermark_stability_summary,
 )
 from product_analytics.generator import generate_events
 from product_analytics.quality import certify_events, certify_events_with_rejects, idempotent_backfill
@@ -120,6 +123,33 @@ def test_late_arrival_backfill_is_idempotent():
     assert set(once["event_id"]) == {"e1", "e2"}
 
 
+def test_policy_grid_uses_only_finalizable_event_dates_for_decision_fraction():
+    historical = [
+        _event("e1", "first_open", "2026-01-01T08:00:00Z", "2026-01-01T09:00:00Z", "u1"),
+        _event("e2", "app_open", "2026-01-02T08:00:00Z", "2026-01-06T08:00:00Z", "u2"),
+    ]
+    future = [
+        _event("e3", "app_open", "2026-02-01T08:00:00Z", "2026-02-10T08:00:00Z", "u3"),
+        _event("e4", "app_open", "2026-02-02T08:00:00Z", "2026-02-12T08:00:00Z", "u4"),
+    ]
+    budget = WatermarkRiskBudget(
+        max_late_event_fraction=1.0,
+        max_revised_metric_cell_fraction=1.0,
+        max_abs_revenue_revision_gbp=999.0,
+        max_abs_paid_subscription_revision=999.0,
+    )
+    as_of = "2026-01-10T23:59:59Z"
+    base = watermark_policy_grid(pd.DataFrame(historical), as_of, candidate_hours=(48,), budget=budget)
+    with_future = watermark_policy_grid(
+        pd.DataFrame(historical + future), as_of, candidate_hours=(48,), budget=budget
+    )
+
+    assert base.loc[0, "finalizable_events"] == with_future.loc[0, "finalizable_events"]
+    assert base.loc[0, "late_event_fraction"] == with_future.loc[0, "late_event_fraction"]
+    assert with_future.loc[0, "settled_stream_events"] > base.loc[0, "settled_stream_events"]
+    assert with_future.loc[0, "whole_stream_late_event_fraction"] != base.loc[0, "whole_stream_late_event_fraction"]
+
+
 def test_watermark_policy_grid_exposes_latency_risk_tradeoff():
     events = pd.DataFrame(
         [
@@ -141,7 +171,8 @@ def test_watermark_policy_grid_exposes_latency_risk_tradeoff():
         ),
     )
     assert list(grid["allowed_lateness_hours"]) == [24.0, 48.0, 72.0, 96.0]
-    assert grid["late_event_fraction"].is_monotonic_decreasing
+    assert grid["whole_stream_late_event_fraction"].is_monotonic_decreasing
+    assert grid["finalizable_events"].is_monotonic_decreasing
     assert grid["finalized_calendar_dates"].is_monotonic_decreasing
     assert (grid["finalization_lag_days"] == grid["allowed_lateness_hours"] / 24.0).all()
 
@@ -164,6 +195,7 @@ def test_policy_selection_uses_shortest_feasible_candidate_without_weighted_scor
                 "revised_metric_cell_fraction": 0.008,
                 "max_abs_revenue_revision_gbp": 8.0,
                 "max_abs_paid_subscription_revision": 1.0,
+                "finalizable_events": 100,
             },
             {
                 "allowed_lateness_hours": 72.0,
@@ -172,6 +204,7 @@ def test_policy_selection_uses_shortest_feasible_candidate_without_weighted_scor
                 "revised_metric_cell_fraction": 0.004,
                 "max_abs_revenue_revision_gbp": 0.0,
                 "max_abs_paid_subscription_revision": 0.0,
+                "finalizable_events": 90,
             },
         ]
     )
@@ -179,4 +212,53 @@ def test_policy_selection_uses_shortest_feasible_candidate_without_weighted_scor
     assert decision["status"] == "selected"
     assert decision["selected_lateness_hours"] == 48.0
     assert decision["weighted_score_used"] is False
+    assert decision["late_event_fraction_scope"] == "event_date_on_or_before_candidate_watermark"
     assert "shortest candidate" in decision["selection_rule"]
+
+
+def test_rolling_backtest_preserves_windows_and_stability_contract():
+    events = pd.DataFrame(
+        [
+            _event("e1", "first_open", "2026-01-01T08:00:00Z", "2026-01-01T09:00:00Z", "u1"),
+            _event("e2", "app_open", "2026-01-02T08:00:00Z", "2026-01-02T10:00:00Z", "u2"),
+            _event("e3", "app_open", "2026-01-03T08:00:00Z", "2026-01-03T10:00:00Z", "u3"),
+        ]
+    )
+    budget = WatermarkRiskBudget(
+        max_late_event_fraction=1.0,
+        max_revised_metric_cell_fraction=1.0,
+        max_abs_revenue_revision_gbp=999.0,
+        max_abs_paid_subscription_revision=999.0,
+    )
+    grid, windows = rolling_watermark_backtest(
+        events,
+        processing_snapshots=("2026-01-06T23:59:59Z", "2026-01-07T23:59:59Z"),
+        candidate_hours=(24, 48),
+        budget=budget,
+    )
+    assert grid["window_index"].nunique() == 2
+    assert len(grid) == 4
+    assert len(windows) == 2
+    assert windows["selected_lateness_hours"].eq(24.0).all()
+
+    stability = watermark_stability_summary(grid)
+    assert stability["windows"].eq(2).all()
+    assert stability["stable_all_windows"].all()
+    decision = select_stable_watermark_policy(stability, budget)
+    assert decision["selected_lateness_hours"] == 24.0
+    assert decision["weighted_score_used"] is False
+    assert decision["budget_relaxed_after_backtest"] is False
+
+
+def test_stable_selector_reports_no_policy_instead_of_relaxing_budget():
+    stability = pd.DataFrame(
+        [
+            {"allowed_lateness_hours": 24.0, "windows": 10, "feasible_windows": 2, "stable_all_windows": False},
+            {"allowed_lateness_hours": 48.0, "windows": 10, "feasible_windows": 9, "stable_all_windows": False},
+            {"allowed_lateness_hours": 72.0, "windows": 10, "feasible_windows": 9, "stable_all_windows": False},
+        ]
+    )
+    decision = select_stable_watermark_policy(stability)
+    assert decision["status"] == "no_candidate_stable_in_all_windows"
+    assert decision["selected_lateness_hours"] is None
+    assert decision["budget_relaxed_after_backtest"] is False
