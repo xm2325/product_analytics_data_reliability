@@ -9,6 +9,7 @@
 - added portable SHA-256 artifact manifests;
 - added an independent generated-build validator;
 - upgraded CI to build, validate and upload a 120-day reference-evidence artifact;
+- excluded the synthetic post-acquisition outcome tail from forecast validation using an explicit observation-maturity cutoff;
 - separated current reproducible evidence from preserved historical planning snapshots.
 
 ## v0.22.0
