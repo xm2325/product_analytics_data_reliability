@@ -5,7 +5,7 @@ on:
   pull_request:
 
 jobs:
-  test:
+  test-and-reference:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,7 +18,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install -e .
-      - name: Test
+      - name: Unit tests
         run: pytest -q
-      - name: Reference smoke run
-        run: python scripts/run_workbench.py --days 60 --output-dir build/ci-reference
+      - name: Build reference evidence
+        run: python scripts/run_workbench.py --days 120 --output-dir build/ci-reference
+      - name: Validate reference evidence
+        run: python scripts/validate_build.py build/ci-reference
+      - name: Show generated evidence inventory
+        run: |
+          ls -lh build/ci-reference
+          cat build/ci-reference/quality_report.json
+          cat build/ci-reference/MANIFEST.json
