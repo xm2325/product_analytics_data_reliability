@@ -38,7 +38,7 @@ def generate_events(
 
     ``event_ts`` is when an action happened. ``ingested_at`` is when the data
     platform first received it. Most events arrive promptly; a small controlled
-    tail arrives one to four days later so watermark/backfill behaviour can be
+    tail arrives about four days later so watermark/backfill behaviour can be
     tested without changing business truth.
     """
     commercial_rng = np.random.default_rng(seed)
@@ -105,12 +105,11 @@ def generate_events(
     frame = pd.DataFrame(rows, columns=EVENT_COLUMNS)
     frame["event_ts"] = pd.to_datetime(frame["event_ts"], utc=True)
 
-    # Separate processing-time stream. The discrete tail is deliberate:
-    # 0.5% of events arrive ~4 days late and therefore breach a 48-hour
-    # watermark. Jitter avoids every event sharing the same arrival offset.
+    # Separate processing-time stream. 99.5% of events arrive within the
+    # 48-hour contract; the 0.5% ~96-hour tail intentionally breaches it.
     if not frame.empty:
         delay_hours = ingestion_rng.choice(
-            np.array([0, 1, 2, 6, 24, 48, 96], dtype=int),
+            np.array([0, 1, 2, 6, 24, 36, 96], dtype=int),
             size=len(frame),
             p=[0.55, 0.20, 0.10, 0.08, 0.045, 0.020, 0.005],
         )
@@ -124,7 +123,6 @@ def generate_events(
         if len(purchase_idx):
             n_dup = max(1, int(round(0.10 * len(purchase_idx))))
             dup_idx = commercial_rng.choice(purchase_idx, size=n_dup, replace=False)
-            # Exact transport duplicate: event id and ingestion time are kept.
             duplicates = frame.loc[dup_idx].copy()
             frame = pd.concat([frame, duplicates], ignore_index=True)
 
