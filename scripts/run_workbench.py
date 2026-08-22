@@ -9,7 +9,7 @@ import pandas as pd
 
 from product_analytics.config import PRODUCTS
 from product_analytics.contracts import event_contract
-from product_analytics.forecasting import evaluate_forecast, seasonal_naive
+from product_analytics.forecasting import evaluate_forecast, mature_metric_history, seasonal_naive
 from product_analytics.generator import generate_events
 from product_analytics.metrics import metric_contract_records, portfolio_conversion
 from product_analytics.pipeline import run_pipeline
@@ -55,12 +55,16 @@ def main() -> None:
         outputs.append(path)
 
     forecast_rows = []
-    for product, frame in gold.groupby("product"):
-        frame = frame.sort_values("date")
+    forecast_cutoffs: dict[str, str] = {}
+    for product in sorted(gold["product"].unique()):
+        frame, cutoff = mature_metric_history(gold, silver, product)
+        forecast_cutoffs[product] = str(cutoff)
         for metric in ["dau", "revenue_gbp", "paid_subscription"]:
             backtest = seasonal_naive(frame[metric], season=7, holdout=28)
             evaluation = evaluate_forecast(f"{product}:{metric}", backtest)
-            forecast_rows.append(asdict(evaluation))
+            row = asdict(evaluation)
+            row["observation_cutoff"] = str(cutoff)
+            forecast_rows.append(row)
     forecast_frame = pd.DataFrame(forecast_rows).sort_values("metric").reset_index(drop=True)
     forecast_path = out / "forecast_evaluations.csv"
     forecast_frame.to_csv(forecast_path, index=False)
@@ -87,6 +91,7 @@ def main() -> None:
         "quality": quality,
         "portfolio_conversion": portfolio_conversion(silver),
         "forecast_evaluations": forecast_rows,
+        "forecast_observation_cutoff": forecast_cutoffs,
         "forecast_gate": {
             "approved": int(forecast_frame["approved"].sum()),
             "withheld": int((~forecast_frame["approved"]).sum()),
