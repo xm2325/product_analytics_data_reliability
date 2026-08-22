@@ -3,6 +3,7 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 
+from product_analytics.freshness import LateArrivalPolicy, late_arrival_summary
 from product_analytics.generator import generate_events
 from product_analytics.metrics import daily_metrics, retention_maturity_ledger
 from product_analytics.quality import certify_events
@@ -20,19 +21,21 @@ def _controlled_fault_frame() -> pd.DataFrame:
     return raw
 
 
-def test_sql_silver_matches_python_certification():
-    raw = _controlled_fault_frame()
-    python_silver, report = certify_events(raw)
-
+def _sql_silver(raw: pd.DataFrame) -> pd.DataFrame:
     con = duckdb.connect()
     try:
         con.register("bronze_df", raw)
         con.execute("CREATE TABLE bronze_events AS SELECT * FROM bronze_df")
-        sql = (ROOT / "sql" / "silver_events.sql").read_text(encoding="utf-8")
-        sql_silver = con.execute(sql).df()
+        silver_sql = (ROOT / "sql" / "silver_events.sql").read_text(encoding="utf-8")
+        return con.execute(silver_sql).df()
     finally:
         con.close()
 
+
+def test_sql_silver_matches_python_certification():
+    raw = _controlled_fault_frame()
+    python_silver, report = certify_events(raw)
+    sql_silver = _sql_silver(raw)
     assert report.rows_rejected == 2
     assert len(sql_silver) == len(python_silver)
     assert set(sql_silver["event_id"]) == set(python_silver["event_id"])
@@ -55,18 +58,9 @@ def test_sql_gold_matches_python_gold():
         con.close()
 
     columns = [
-        "product",
-        "date",
-        "dau",
-        "dau_legacy_any_event",
-        "dau_definition_delta",
-        "dau_definition_delta_pct",
-        "first_open",
-        "trial_start",
-        "paid_subscription",
-        "revenue_gbp",
-        "conversion_first_open",
-        "conversion_trial_start",
+        "product", "date", "dau", "dau_legacy_any_event", "dau_definition_delta",
+        "dau_definition_delta_pct", "first_open", "trial_start", "paid_subscription",
+        "revenue_gbp", "conversion_first_open", "conversion_trial_start",
     ]
     python_gold = python_gold[columns].copy()
     sql_gold = sql_gold[columns].copy()
@@ -77,15 +71,7 @@ def test_sql_gold_matches_python_gold():
         sql_gold[column] = pd.to_numeric(sql_gold[column], errors="coerce").astype(float)
     python_gold = python_gold.sort_values(["product", "date"]).reset_index(drop=True)
     sql_gold = sql_gold.sort_values(["product", "date"]).reset_index(drop=True)
-
-    pd.testing.assert_frame_equal(
-        python_gold,
-        sql_gold,
-        check_dtype=False,
-        check_exact=False,
-        rtol=1e-12,
-        atol=1e-12,
-    )
+    pd.testing.assert_frame_equal(python_gold, sql_gold, check_dtype=False, check_exact=False, rtol=1e-12, atol=1e-12)
 
 
 def test_sql_retention_maturity_matches_python_ledger():
@@ -97,9 +83,7 @@ def test_sql_retention_maturity_matches_python_ledger():
         for product, frame in first_open.groupby("product")
     }
     python_ledger = retention_maturity_ledger(
-        python_silver,
-        horizons=(7, 30),
-        observation_end_by_product=analysis_as_of,
+        python_silver, horizons=(7, 30), observation_end_by_product=analysis_as_of
     ).copy()
 
     con = duckdb.connect()
@@ -114,19 +98,9 @@ def test_sql_retention_maturity_matches_python_ledger():
         con.close()
 
     columns = [
-        "product",
-        "cohort_date",
-        "horizon_days",
-        "target_date",
-        "analysis_as_of",
-        "mature",
-        "maturity_status",
-        "cohort_users",
-        "eligible_users",
-        "excluded_users",
-        "retained_users",
-        "retention_rate",
-        "exclusion_reason",
+        "product", "cohort_date", "horizon_days", "target_date", "analysis_as_of",
+        "mature", "maturity_status", "cohort_users", "eligible_users", "excluded_users",
+        "retained_users", "retention_rate", "exclusion_reason",
     ]
     python_ledger = python_ledger[columns].copy()
     sql_ledger = sql_ledger[columns].copy()
@@ -138,12 +112,34 @@ def test_sql_retention_maturity_matches_python_ledger():
         sql_ledger[column] = pd.to_numeric(sql_ledger[column], errors="coerce").astype(float)
     python_ledger = python_ledger.sort_values(["product", "horizon_days", "cohort_date"]).reset_index(drop=True)
     sql_ledger = sql_ledger.sort_values(["product", "horizon_days", "cohort_date"]).reset_index(drop=True)
+    pd.testing.assert_frame_equal(python_ledger, sql_ledger, check_dtype=False, check_exact=False, rtol=1e-12, atol=1e-12)
 
+
+def test_sql_late_arrival_summary_matches_python():
+    raw = _controlled_fault_frame()
+    python_silver, _ = certify_events(raw)
+    python_summary = late_arrival_summary(
+        python_silver, LateArrivalPolicy(allowed_lateness_hours=48.0)
+    ).copy()
+
+    con = duckdb.connect()
+    try:
+        con.register("silver_df", python_silver)
+        con.execute("CREATE TABLE silver_events AS SELECT * FROM silver_df")
+        sql = (ROOT / "sql" / "late_arrival_summary.sql").read_text(encoding="utf-8")
+        sql_summary = con.execute(sql).df()
+    finally:
+        con.close()
+
+    numeric = [
+        "events", "late_beyond_watermark", "delay_p50_hours", "delay_p95_hours",
+        "delay_max_hours", "late_fraction",
+    ]
+    for column in numeric:
+        python_summary[column] = pd.to_numeric(python_summary[column], errors="coerce").astype(float)
+        sql_summary[column] = pd.to_numeric(sql_summary[column], errors="coerce").astype(float)
+    python_summary = python_summary.sort_values(["product", "event_type"]).reset_index(drop=True)
+    sql_summary = sql_summary.sort_values(["product", "event_type"]).reset_index(drop=True)
     pd.testing.assert_frame_equal(
-        python_ledger,
-        sql_ledger,
-        check_dtype=False,
-        check_exact=False,
-        rtol=1e-12,
-        atol=1e-12,
+        python_summary, sql_summary, check_dtype=False, check_exact=False, rtol=1e-9, atol=1e-9
     )
