@@ -41,7 +41,6 @@ def with_lateness(
     events: pd.DataFrame,
     policy: LateArrivalPolicy = DEFAULT_LATE_ARRIVAL_POLICY,
 ) -> pd.DataFrame:
-    """Attach processing-delay and watermark-breach fields to certified events."""
     frame = _processing_frame(events)
     frame["ingestion_delay_hours"] = (
         frame["ingested_at"] - frame["event_ts"]
@@ -54,7 +53,6 @@ def late_arrival_summary(
     events: pd.DataFrame,
     policy: LateArrivalPolicy = DEFAULT_LATE_ARRIVAL_POLICY,
 ) -> pd.DataFrame:
-    """Summarise processing latency without mixing it into business KPIs."""
     frame = with_lateness(events, policy)
     out = (
         frame.groupby(["product", "event_type"], as_index=False)
@@ -71,7 +69,6 @@ def late_arrival_summary(
 
 
 def available_as_of(events: pd.DataFrame, processing_as_of: object) -> pd.DataFrame:
-    """Return only rows that had reached the platform by a processing-time snapshot."""
     frame = _processing_frame(events)
     as_of = _utc_timestamp(processing_as_of)
     return frame.loc[frame["ingested_at"].le(as_of)].copy().reset_index(drop=True)
@@ -81,9 +78,9 @@ def watermark_event_date(
     processing_as_of: object,
     policy: LateArrivalPolicy = DEFAULT_LATE_ARRIVAL_POLICY,
 ):
-    """Latest event date nominally final under a processing-time watermark."""
     as_of = _utc_timestamp(processing_as_of)
-    return (as_of - pd.Timedelta(hours=policy.allowed_lateness_hours)).date()
+    lateness = pd.Timedelta(seconds=int(round(policy.allowed_lateness_hours * 3600.0)))
+    return (as_of - lateness).date()
 
 
 def late_after_watermark_snapshot(
@@ -91,7 +88,6 @@ def late_after_watermark_snapshot(
     processing_as_of: object,
     policy: LateArrivalPolicy = DEFAULT_LATE_ARRIVAL_POLICY,
 ) -> pd.DataFrame:
-    """Events missing at snapshot time for event dates the watermark called final."""
     frame = with_lateness(events, policy)
     as_of = _utc_timestamp(processing_as_of)
     watermark_date = watermark_event_date(as_of, policy)
@@ -101,17 +97,9 @@ def late_after_watermark_snapshot(
     late["processing_as_of"] = as_of
     late["watermark_event_date"] = watermark_date
     columns = [
-        "event_id",
-        "user_id",
-        "product",
-        "event_type",
-        "event_ts",
-        "event_date",
-        "ingested_at",
-        "ingestion_delay_hours",
-        "processing_as_of",
-        "watermark_event_date",
-        "revenue_gbp",
+        "event_id", "user_id", "product", "event_type", "event_ts", "event_date",
+        "ingested_at", "ingestion_delay_hours", "processing_as_of",
+        "watermark_event_date", "revenue_gbp",
     ]
     return late[columns].sort_values(["event_date", "ingested_at", "event_id"]).reset_index(drop=True)
 
@@ -121,13 +109,6 @@ def metric_revision_report(
     processing_as_of: object,
     policy: LateArrivalPolicy = DEFAULT_LATE_ARRIVAL_POLICY,
 ) -> pd.DataFrame:
-    """Compare as-of versus settled KPIs for dates nominally behind watermark.
-
-    The settled view uses all currently supplied certified rows, while the
-    snapshot view uses only rows ingested by ``processing_as_of``. Restricting
-    comparison to event dates at or before the watermark isolates corrections
-    to dates that the operating policy would otherwise have called final.
-    """
     from .metrics import daily_metrics
 
     settled_events = _processing_frame(events)
@@ -161,7 +142,6 @@ def metric_revision_report(
 
 
 def revision_summary(revisions: pd.DataFrame) -> pd.DataFrame:
-    """Aggregate watermark revisions without hiding the affected metric."""
     out = (
         revisions.groupby(["product", "metric"], as_index=False)
         .agg(
@@ -179,7 +159,6 @@ def late_arrival_contract(
     processing_as_of: object,
     policy: LateArrivalPolicy = DEFAULT_LATE_ARRIVAL_POLICY,
 ) -> dict[str, object]:
-    """Machine-readable processing-time policy for generated evidence."""
     return {
         **asdict(policy),
         "processing_as_of": str(_utc_timestamp(processing_as_of)),
