@@ -1,24 +1,34 @@
 claim,value,unit,context,interpretation_limit
-rows_raw,276249,rows,v0.24 seed=2206 days=120 synthetic reference,includes explicit app_open activity
-rows_rejected,589,rows,v0.24 certification,controlled faults remain on commercial event family
-rows_certified,275660,rows,v0.24 certification,synthetic data
-raw_revenue_overstatement_min,9.1278,percent,v0.24 controlled-fault reconciliation,synthetic data
-raw_revenue_overstatement_max,10.9569,percent,v0.24 controlled-fault reconciliation,synthetic data
-conversion_from_first_open,16.1663,percent,v0.24 commercial stream preserved,denominator is first_open
-conversion_from_trial_start,48.5473,percent,v0.24 commercial stream preserved,denominator is trial_start
-dau_forecasts_approved,3,count,v0.24 app_open DAU forecast evaluation,planning gate only
-revenue_subscription_forecasts_withheld,6,count,v0.24 commercial forecast evaluation,planning gate only
-dau_mape_min,3.8916,percent,v0.24 28-point holdout,app_open DAU seasonal-naive baseline
-dau_mape_max,5.9191,percent,v0.24 28-point holdout,app_open DAU seasonal-naive baseline
-revenue_subscription_mape_min,25.5931,percent,v0.24 28-point holdout,commercial stream unchanged
-revenue_subscription_mape_max,37.3253,percent,v0.24 28-point holdout,commercial stream unchanged
-legacy_dau_overstatement_file_transfer,5.2746,percent,v0.24 dual-run mean DAU,legacy any-event relative to app-open DAU
-legacy_dau_overstatement_notes_app,2.2096,percent,v0.24 dual-run mean DAU,legacy any-event relative to app-open DAU
-legacy_dau_overstatement_photo_editor,4.3497,percent,v0.24 dual-run mean DAU,legacy any-event relative to app-open DAU
-file_transfer_d7_retention,19.6049,percent,v0.24 exact-day app_open retention,synthetic activity model
-file_transfer_d30_retention,6.2057,percent,v0.24 exact-day app_open retention,synthetic activity model
-notes_app_d7_retention,38.1654,percent,v0.24 exact-day app_open retention,synthetic activity model
-notes_app_d30_retention,21.9023,percent,v0.24 exact-day app_open retention,synthetic activity model
-photo_editor_d7_retention,26.7358,percent,v0.24 exact-day app_open retention,synthetic activity model
-photo_editor_d30_retention,11.3568,percent,v0.24 exact-day app_open retention,synthetic activity model
-manifest_artifacts,15,count,v0.24 portable reference evidence,SHA-256 integrity manifest
+rows_raw,276249,rows,v0.25 seed=2206 days=120 synthetic reference,includes explicit app_open activity
+rows_rejected,589,rows,v0.25 certification,controlled faults remain on commercial event family
+rows_certified,275660,rows,v0.25 certification,synthetic data
+raw_revenue_overstatement_min,9.1278,percent,v0.25 controlled-fault reconciliation,synthetic data
+raw_revenue_overstatement_max,10.9569,percent,v0.25 controlled-fault reconciliation,synthetic data
+conversion_from_first_open,16.1663,percent,v0.25 commercial stream preserved,denominator is first_open
+conversion_from_trial_start,48.5473,percent,v0.25 commercial stream preserved,denominator is trial_start
+dau_forecasts_approved,3,count,v0.25 app_open DAU forecast evaluation,planning gate only
+revenue_subscription_forecasts_withheld,6,count,v0.25 commercial forecast evaluation,planning gate only
+dau_mape_min,3.8916,percent,v0.25 28-point holdout,app_open DAU seasonal-naive baseline
+dau_mape_max,5.9191,percent,v0.25 28-point holdout,app_open DAU seasonal-naive baseline
+revenue_subscription_mape_min,25.5931,percent,v0.25 28-point holdout,commercial stream unchanged
+revenue_subscription_mape_max,37.3253,percent,v0.25 28-point holdout,commercial stream unchanged
+legacy_dau_overstatement_file_transfer,5.2746,percent,v0.25 dual-run mean DAU,legacy any-event relative to app-open DAU
+legacy_dau_overstatement_notes_app,2.2096,percent,v0.25 dual-run mean DAU,legacy any-event relative to app-open DAU
+legacy_dau_overstatement_photo_editor,4.3497,percent,v0.25 dual-run mean DAU,legacy any-event relative to app-open DAU
+file_transfer_d7_mature_users,9450,users,v0.25 analysis_as_of=2026-04-30,573 later-cohort users excluded
+file_transfer_d30_mature_users,7426,users,v0.25 analysis_as_of=2026-04-30,2597 later-cohort users excluded
+notes_app_d7_mature_users,8643,users,v0.25 analysis_as_of=2026-04-30,525 later-cohort users excluded
+notes_app_d30_mature_users,6947,users,v0.25 analysis_as_of=2026-04-30,2221 later-cohort users excluded
+photo_editor_d7_mature_users,10352,users,v0.25 analysis_as_of=2026-04-30,637 later-cohort users excluded
+photo_editor_d30_mature_users,8199,users,v0.25 analysis_as_of=2026-04-30,2790 later-cohort users excluded
+file_transfer_d7_retention,19.5556,percent,v0.25 exact-day mature-only app_open retention,synthetic activity model
+file_transfer_d30_retention,6.3560,percent,v0.25 exact-day mature-only app_open retention,synthetic activity model
+notes_app_d7_retention,38.3547,percent,v0.25 exact-day mature-only app_open retention,synthetic activity model
+notes_app_d30_retention,21.8799,percent,v0.25 exact-day mature-only app_open retention,synthetic activity model
+photo_editor_d7_retention,26.8161,percent,v0.25 exact-day mature-only app_open retention,synthetic activity model
+photo_editor_d30_retention,11.1965,percent,v0.25 exact-day mature-only app_open retention,synthetic activity model
+d7_eligible_fraction_min,94.2033,percent,v0.25 point-in-time maturity denominator,not a retention-rate metric
+d7_eligible_fraction_max,94.2831,percent,v0.25 point-in-time maturity denominator,not a retention-rate metric
+d30_eligible_fraction_min,74.0896,percent,v0.25 point-in-time maturity denominator,not a retention-rate metric
+d30_eligible_fraction_max,75.7744,percent,v0.25 point-in-time maturity denominator,not a retention-rate metric
+manifest_artifacts,18,count,v0.25 portable reference evidence,SHA-256 integrity manifest
