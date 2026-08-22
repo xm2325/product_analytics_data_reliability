@@ -1,4 +1,4 @@
-.PHONY: install reference validate test check clean
+.PHONY: install reference validate validate-reference test check clean
 
 install:
 	python -m pip install -r requirements.txt
@@ -10,10 +10,13 @@ reference:
 validate:
 	python scripts/validate_build.py build/reference
 
+validate-reference:
+	python scripts/validate_reference_claims.py build/reference
+
 test:
 	pytest -q
 
-check: test reference validate
+check: test reference validate validate-reference
 
 clean:
 	rm -rf build .pytest_cache

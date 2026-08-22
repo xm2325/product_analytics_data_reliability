@@ -2,11 +2,14 @@ import pandas as pd
 
 from product_analytics.freshness import (
     LateArrivalPolicy,
+    WatermarkRiskBudget,
     available_as_of,
     late_after_watermark_snapshot,
     late_arrival_summary,
     metric_revision_report,
+    select_watermark_policy,
     watermark_event_date,
+    watermark_policy_grid,
 )
 from product_analytics.generator import generate_events
 from product_analytics.quality import certify_events, certify_events_with_rejects, idempotent_backfill
@@ -115,3 +118,65 @@ def test_late_arrival_backfill_is_idempotent():
     twice = idempotent_backfill(once, correction)
     pd.testing.assert_frame_equal(once, twice)
     assert set(once["event_id"]) == {"e1", "e2"}
+
+
+def test_watermark_policy_grid_exposes_latency_risk_tradeoff():
+    events = pd.DataFrame(
+        [
+            _event("e1", "first_open", "2026-01-01T08:00:00Z", "2026-01-01T09:00:00Z", "u1"),
+            _event("e2", "app_open", "2026-01-01T09:00:00Z", "2026-01-02T15:00:00Z", "u2"),
+            _event("e3", "app_open", "2026-01-02T08:00:00Z", "2026-01-04T20:00:00Z", "u3"),
+            _event("e4", "app_open", "2026-01-02T09:00:00Z", "2026-01-06T13:00:00Z", "u4"),
+        ]
+    )
+    grid = watermark_policy_grid(
+        events,
+        "2026-01-05T23:59:59Z",
+        candidate_hours=(24, 48, 72, 96),
+        budget=WatermarkRiskBudget(
+            max_late_event_fraction=1.0,
+            max_revised_metric_cell_fraction=1.0,
+            max_abs_revenue_revision_gbp=999.0,
+            max_abs_paid_subscription_revision=999.0,
+        ),
+    )
+    assert list(grid["allowed_lateness_hours"]) == [24.0, 48.0, 72.0, 96.0]
+    assert grid["late_event_fraction"].is_monotonic_decreasing
+    assert grid["finalized_calendar_dates"].is_monotonic_decreasing
+    assert (grid["finalization_lag_days"] == grid["allowed_lateness_hours"] / 24.0).all()
+
+
+def test_policy_selection_uses_shortest_feasible_candidate_without_weighted_score():
+    grid = pd.DataFrame(
+        [
+            {
+                "allowed_lateness_hours": 24.0,
+                "feasible": False,
+                "late_event_fraction": 0.02,
+                "revised_metric_cell_fraction": 0.02,
+                "max_abs_revenue_revision_gbp": 5.0,
+                "max_abs_paid_subscription_revision": 1.0,
+            },
+            {
+                "allowed_lateness_hours": 48.0,
+                "feasible": True,
+                "late_event_fraction": 0.004,
+                "revised_metric_cell_fraction": 0.008,
+                "max_abs_revenue_revision_gbp": 8.0,
+                "max_abs_paid_subscription_revision": 1.0,
+            },
+            {
+                "allowed_lateness_hours": 72.0,
+                "feasible": True,
+                "late_event_fraction": 0.003,
+                "revised_metric_cell_fraction": 0.004,
+                "max_abs_revenue_revision_gbp": 0.0,
+                "max_abs_paid_subscription_revision": 0.0,
+            },
+        ]
+    )
+    decision = select_watermark_policy(grid)
+    assert decision["status"] == "selected"
+    assert decision["selected_lateness_hours"] == 48.0
+    assert decision["weighted_score_used"] is False
+    assert "shortest candidate" in decision["selection_rule"]
