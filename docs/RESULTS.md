@@ -2,7 +2,7 @@
 
 All data in this repository are synthetic. Current reproducible evidence is kept separate from preserved historical planning context.
 
-## A. Current v0.24 reproducible evidence
+## A. Current v0.25 reproducible evidence
 
 Run:
 
@@ -11,82 +11,63 @@ python scripts/run_workbench.py --output-dir build/reference
 python scripts/validate_build.py build/reference
 ```
 
-The GitHub Actions 120-day reference run (`seed=2206`) verified:
+The GitHub Actions 120-day reference run (`seed=2206`) verified 276,249 raw events, 589 rejected rows, 275,660 certified rows, three approved DAU forecasts and six withheld revenue/subscription forecasts. Commercial funnel, reconciliation, DAU migration and forecast values remain unchanged from v0.24; v0.25 changes the point-in-time retention evidence contract.
 
-| Evidence | Result |
-|---|---:|
-| Raw rows | 276,249 |
-| Rejected rows | 589 |
-| Certified rows | 275,660 |
-| Duplicate event rows | 489 |
-| Missing-identity rows | 101 |
-| Revenue overstatement | 9.13%–10.96% |
-| Paid / first-open | 16.17% |
-| Paid / trial-start | 48.55% |
-| DAU v2 forecasts approved | 3 / 3 |
-| DAU v2 MAPE | 3.9%–5.9% |
-| Revenue/subscription forecasts withheld | 6 / 6 |
-| Revenue/subscription MAPE | 25.6%–37.3% |
-| Portable manifest artifacts | 15 |
+### Retention maturity: the v0.25 change
 
-The commercial conversion, revenue reconciliation and revenue/subscription forecast values are unchanged from v0.23. v0.24 intentionally uses a separate activity RNG stream, so adding `app_open` behaviour does not redraw the commercial funnel.
+The common reporting boundary is `analysis_as_of = 2026-04-30`, the final acquisition (`first_open`) date in the reference window. A cohort contributes to D7 or D30 only when its exact target date is on or before that boundary.
 
-### Data reliability
+Future `app_open` rows may physically exist in the synthetic source because the simulator generates follow-up. They are deliberately ignored for immature cohorts. Immature cohorts remain visible in `retention_maturity_ledger.csv` with zero eligible users, their users counted as excluded, and null retained/rate fields.
 
-Controlled duplicate purchase faults remain visible in Bronze revenue and are removed from certified Silver/Gold metrics while retaining rejected-row evidence.
+| Product | Horizon | Total cohort users | Eligible | Excluded | Eligible fraction | Retention among eligible |
+|---|---:|---:|---:|---:|---:|---:|
+| File Transfer | D7 | 10,023 | 9,450 | 573 | **94.28%** | **19.56%** |
+| File Transfer | D30 | 10,023 | 7,426 | 2,597 | **74.09%** | **6.36%** |
+| Notes App | D7 | 9,168 | 8,643 | 525 | **94.27%** | **38.35%** |
+| Notes App | D30 | 9,168 | 6,947 | 2,221 | **75.77%** | **21.88%** |
+| Photo Editor | D7 | 10,989 | 10,352 | 637 | **94.20%** | **26.82%** |
+| Photo Editor | D30 | 10,989 | 8,199 | 2,790 | **74.61%** | **11.20%** |
 
-- `photo_editor`: **9.13%** raw revenue overstatement;
-- `notes_app`: **10.83%**;
-- `file_transfer`: **10.96%**.
+All products have 120 acquisition cohorts. At D7, 113 cohorts are mature and 7 are immature; at D30, 90 are mature and 30 are immature.
+
+The lower D30 eligible fraction is an **evidence-maturity fact, not a behavioural result**. It means roughly one quarter of users have not yet had 30 calendar days to become observable at the reporting date. The D30 retention rate is calculated only among the mature denominator.
+
+### Why this differs from v0.24
+
+v0.24 used the simulator's available follow-up window and effectively waited long enough for all acquisition cohorts to reach D30. That is useful for studying a completed historical cohort, but it is not the correct semantics for a point-in-time operating report.
+
+v0.25 makes the distinction explicit:
+
+```text
+source may contain future follow-up
+                !=
+information available as of reporting date
+```
+
+The retention rates remain close to v0.24, which is reassuring: the material change is denominator governance rather than a manufactured change in user behaviour.
 
 ### DAU definition migration
 
-v0.24 introduces explicit active use:
+The current activity contract remains:
 
 ```text
 DAU v1 = unique users with any certified event       [deprecated]
 DAU v2 = unique users with app_open                  [current]
 ```
 
-The two definitions are calculated on the same certified events for 120 acquisition-window days.
-
-| Product | Mean DAU v2 | Mean DAU v1 | v1 relative overstatement | p95 daily delta |
-|---|---:|---:|---:|---:|
-| File Transfer | 387.2 | 407.7 | **5.27%** | 29.1 users |
-| Notes App | 733.2 | 749.4 | **2.21%** | 24.0 users |
-| Photo Editor | 584.9 | 610.4 | **4.35%** | 33.1 users |
-
-This is large enough to matter operationally but not so large that it indicates a completely different product population. The dual-run makes the semantic impact visible before downstream consumers switch definitions.
-
-### Activity retention
-
-A user is retained at horizon `h` when an `app_open` occurs exactly `h` calendar days after their first-open cohort date. Cohorts are used only after the horizon is mature.
-
-| Product | Eligible users | D7 | D30 |
-|---|---:|---:|---:|
-| File Transfer | 10,023 | **19.60%** | **6.21%** |
-| Notes App | 9,168 | **38.17%** | **21.90%** |
-| Photo Editor | 10,989 | **26.74%** | **11.36%** |
-
-The D7→D30 decay is generated by the synthetic activity model; these are not external product benchmarks.
+Mean v1 overstatement relative to v2 remains **5.27%** for File Transfer, **2.21%** for Notes App and **4.35%** for Photo Editor.
 
 ### Forecast governance
 
-Forecast evaluation still applies the explicit final-`first_open` observation boundary before the 28-point holdout.
-
-With DAU v2 based on `app_open`:
-
-- `photo_editor`: **3.89% MAPE**, approved;
-- `notes_app`: **3.99%**, approved;
-- `file_transfer`: **5.92%**, approved.
-
-The six revenue / paid-subscription baselines remain at **25.6%–37.3% MAPE** and are withheld by the unchanged 20% planning gate.
-
-This separation is useful: adding a better-defined, smoother active-use metric improves the DAU forecast target without making volatile commercial outcomes look artificially forecastable.
+DAU v2 forecast MAPE remains **3.89%** for Photo Editor, **3.99%** for Notes App and **5.92%** for File Transfer, with all three approved under the unchanged 20% planning gate. All six revenue / paid-subscription baselines remain at **25.6%–37.3% MAPE** and are withheld.
 
 ### Python / SQL parity
 
-v0.24 adds CI tests that execute `sql/silver_events.sql` and `sql/gold_daily_metrics.sql` in DuckDB and compare them with the Python certification/Gold implementations on the same controlled-fault data. This makes the SQL path a tested reference implementation rather than documentation-only code.
+CI independently executes the Silver, Gold and retention-maturity SQL in DuckDB and compares them with the Python implementations. The retention parity check covers the full cohort ledger, including target date, reporting boundary, maturity status, eligible/excluded users, retained users, rates and exclusion reason—not only the final percentage.
+
+### Evidence integrity
+
+The successful v0.25 reference build contains **18 portable SHA-256-manifested artifacts** plus the DuckDB database. Independent build validation checks maturity date boundaries, complete user accounting, null outcomes for immature cohorts and the requirement that D30 has less mature evidence than D7.
 
 ## B. Preserved planning snapshot
 
