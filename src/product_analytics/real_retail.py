@@ -172,10 +172,9 @@ def build_daily_metrics(canonical: pd.DataFrame) -> pd.DataFrame:
         )
     )
     identified = purchases.loc[purchases["customer_id"].notna()]
-    customers = (
-        identified.groupby("date")["customer_id"].nunique().rename("active_customers")
-    )
+    customers = identified.groupby("date")["customer_id"].nunique().rename("active_customers")
     daily = daily.set_index("date").join(customers, how="left")
+    daily["active_customers"] = daily["active_customers"].fillna(0.0)
     full_index = pd.date_range(daily.index.min(), daily.index.max(), freq="D")
     daily = daily.reindex(full_index, fill_value=0.0)
     daily.index.name = "date"
