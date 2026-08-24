@@ -13,7 +13,13 @@ EXPECTED_APPROVED = {"file_transfer:dau", "notes_app:dau"}
 EXPECTED_TOTAL_METRICS = 9
 EXPECTED_BACKTEST_POINTS_PER_METRIC = 28
 EXPECTED_RECONCILIATION_ROWS_PER_METRIC = 4
-EXPECTED_MANIFEST_ARTIFACTS = 47
+REQUIRED_FORECAST_ARTIFACTS = {
+    "forecast_evaluations.csv",
+    "forecast_backtest.csv",
+    "forecast_reconciliation.csv",
+    "forecast_contract.json",
+    "reference_summary.json",
+}
 
 
 def _fail(message: str) -> None:
@@ -238,22 +244,26 @@ def validate(root: Path) -> None:
         _fail("photo_editor:dau benchmark counterexample disappeared")
 
     summary = json.loads((root / "reference_summary.json").read_text(encoding="utf-8"))
-    if summary.get("version") != "0.34.0":
-        _fail(f"reference summary version is {summary.get('version')}")
+    if not isinstance(summary.get("version"), str) or not summary["version"].strip():
+        _fail("reference summary must declare a non-empty release version")
     if int(summary["forecast_gate"]["approved"]) != 2 or int(summary["forecast_gate"]["withheld"]) != 7:
         _fail("reference summary forecast gate is not 2 approved / 7 withheld")
     if set(summary["forecast_gate"]["approved_metrics"]) != EXPECTED_APPROVED:
         _fail("reference summary approved metric set changed")
 
     manifest = json.loads((root / "MANIFEST.json").read_text(encoding="utf-8"))
-    if int(manifest["artifact_count"]) != EXPECTED_MANIFEST_ARTIFACTS:
-        _fail(f"manifest artifact count is {manifest['artifact_count']}, expected {EXPECTED_MANIFEST_ARTIFACTS}")
+    manifest_paths = {item["path"] for item in manifest.get("artifacts", [])}
+    missing_forecast_manifest = sorted(REQUIRED_FORECAST_ARTIFACTS - manifest_paths)
+    if missing_forecast_manifest:
+        _fail(f"forecast artifacts missing from manifest: {missing_forecast_manifest}")
+    if int(manifest.get("artifact_count", -1)) != len(manifest_paths):
+        _fail("manifest artifact count does not match manifest entries")
 
     print(f"Forecast-plan validation passed: {root}")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Independently validate v0.34 forecast decision evidence")
+    parser = argparse.ArgumentParser(description="Independently validate forecast decision evidence")
     parser.add_argument("root", nargs="?", default="build/reference")
     args = parser.parse_args()
     validate(Path(args.root))

@@ -8,7 +8,12 @@ from pathlib import Path
 import pandas as pd
 
 
-REFERENCE_TEST_COUNT = 75
+REFERENCE_TEST_COUNT = 81
+REFERENCE_MIGRATION_ACTIONS = {
+    "add_optional_country": "APPROVE",
+    "broaden_dau_to_any_event": "WITHHOLD",
+    "rename_required_event_id": "WITHHOLD",
+}
 
 
 def _fail(message: str) -> None:
@@ -42,16 +47,19 @@ def validate(root: Path, ledger_path: Path) -> None:
         _fail("ledger contains duplicate claims")
     if ledger[list(required_columns)].eq("").any().any():
         _fail("ledger contains blank required fields")
-    if not ledger["context"].str.startswith("v0.34").all():
-        _fail("ledger contains stale pre-v0.34 context")
+    if not ledger["context"].str.startswith("v0.35").all():
+        _fail("ledger contains stale pre-v0.35 context")
 
     claims = dict(zip(ledger["claim"], ledger["value"], strict=True))
     summary = json.loads((root / "reference_summary.json").read_text(encoding="utf-8"))
     manifest = json.loads((root / "MANIFEST.json").read_text(encoding="utf-8"))
     forecasts = pd.read_csv(root / "forecast_evaluations.csv").set_index("metric")
+    migration = json.loads((root / "migration_decisions.json").read_text(encoding="utf-8"))
+    migration_impact = pd.read_csv(root / "metric_change_impact.csv")
+    migration_replay = pd.read_csv(root / "migration_replay.csv")
 
-    if summary.get("version") != "0.34.0":
-        _fail(f"generated summary version is {summary.get('version')}, not 0.34.0")
+    if summary.get("version") != "0.35.0":
+        _fail(f"generated summary version is {summary.get('version')}, not 0.35.0")
 
     quality = summary["quality"]
     for name in ("rows_raw", "rows_rejected", "rows_certified"):
@@ -82,6 +90,17 @@ def validate(root: Path, ledger_path: Path) -> None:
         "photo_editor_dau_benchmark_gate",
         str(bool(str(forecasts.loc["photo_editor:dau", "benchmark_gate"]).lower() == "true")).lower(),
     )
+
+    actions = {row["proposal"]: row["action"] for row in migration.get("decisions", [])}
+    if actions != REFERENCE_MIGRATION_ACTIONS:
+        _fail(f"migration action set changed: {actions}")
+    _assert_text(claims, "migration_add_optional_country_action", actions["add_optional_country"])
+    _assert_text(claims, "migration_broaden_dau_action", actions["broaden_dau_to_any_event"])
+    _assert_text(claims, "migration_rename_event_id_action", actions["rename_required_event_id"])
+    max_dau_delta_pct = 100.0 * float(migration_impact["portfolio_weighted_dau_delta_pct"].abs().max())
+    _assert_close(claims, "migration_max_dau_delta_pct", max_dau_delta_pct, tol=1e-9)
+    if int(_as_float(claims, "migration_shadow_replay_rows")) != len(migration_replay):
+        _fail("migration_shadow_replay_rows differs from generated replay")
 
     experiment = summary["pricing_experiment"]
     estimates = {row["metric"]: row for row in experiment["estimates"]}
@@ -137,7 +156,7 @@ def validate(root: Path, ledger_path: Path) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Validate checked-in public v0.34 claims against generated evidence")
+    parser = argparse.ArgumentParser(description="Validate checked-in public v0.35 claims against generated evidence")
     parser.add_argument("root", nargs="?", default="build/reference")
     parser.add_argument("--ledger", default="results/reference_summary.csv")
     args = parser.parse_args()
