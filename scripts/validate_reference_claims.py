@@ -8,7 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 
-REFERENCE_VERSION = "0.34.0"
+REFERENCE_VERSION = "0.35.0"
 REFERENCE_RAW_ROWS = 276_249
 REFERENCE_REJECTED_ROWS = 589
 REFERENCE_CERTIFIED_ROWS = 275_660
@@ -37,7 +37,12 @@ REFERENCE_STABLE_WATERMARK = 96.0
 REFERENCE_96H_REQUIRED_LATE_EVENTS = 2_733_153
 REFERENCE_96H_REQUIRED_REVISION_CELLS = 2_011
 REFERENCE_96H_EVIDENCE_DAYS = 1_330
-REFERENCE_MANIFEST_ARTIFACTS = 47
+REFERENCE_MANIFEST_ARTIFACTS = 53
+REFERENCE_MIGRATION_ACTIONS = {
+    "add_optional_country": "APPROVE",
+    "broaden_dau_to_any_event": "WITHHOLD",
+    "rename_required_event_id": "WITHHOLD",
+}
 
 
 def _close(actual: object, expected: float, tol: float = 1e-9) -> bool:
@@ -54,6 +59,7 @@ def validate_reference_claims(root: Path) -> list[str]:
         "reference_summary.json",
         "forecast_evaluations.csv",
         "forecast_contract.json",
+        "migration_decisions.json",
         "pricing_experiment_estimates.csv",
         "pricing_experiment_decision.json",
         "pricing_guardrail_evidence_plan.json",
@@ -72,6 +78,7 @@ def validate_reference_claims(root: Path) -> list[str]:
     summary = json.loads((root / "reference_summary.json").read_text(encoding="utf-8"))
     forecasts = pd.read_csv(root / "forecast_evaluations.csv")
     forecast_contract = json.loads((root / "forecast_contract.json").read_text(encoding="utf-8"))
+    migration = json.loads((root / "migration_decisions.json").read_text(encoding="utf-8"))
     estimates = pd.read_csv(root / "pricing_experiment_estimates.csv")
     experiment_payload = json.loads((root / "pricing_experiment_decision.json").read_text(encoding="utf-8"))
     guardrail = json.loads((root / "pricing_guardrail_evidence_plan.json").read_text(encoding="utf-8"))
@@ -126,6 +133,12 @@ def validate_reference_claims(root: Path) -> list[str]:
             failures.append("reference_photo_dau_benchmark_gate")
         if _as_bool(photo["approved"]):
             failures.append("reference_photo_dau_unexpectedly_approved")
+
+    migration_actions = {row["proposal"]: row["action"] for row in migration.get("decisions", [])}
+    if migration_actions != REFERENCE_MIGRATION_ACTIONS:
+        failures.append("reference_migration_actions")
+    if not _close(migration.get("metric_delta_tolerance", -1), 0.01, tol=1e-15):
+        failures.append("reference_migration_tolerance")
 
     experiment_summary = summary.get("pricing_experiment", {})
     integrity = experiment_summary.get("integrity", {})
@@ -217,7 +230,7 @@ def validate_reference_claims(root: Path) -> list[str]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Validate pinned deterministic v0.34 reference claims")
+    parser = argparse.ArgumentParser(description="Validate pinned deterministic v0.35 reference claims")
     parser.add_argument("root", nargs="?", default="build/reference")
     args = parser.parse_args()
     failures = validate_reference_claims(Path(args.root))
