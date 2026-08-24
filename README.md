@@ -1,13 +1,13 @@
 # Product Analytics & Data Reliability Workbench
 
-**Version:** v0.31  
+**Version:** v0.32  
 **Stack:** Python · DuckDB · SQL · Pandas · NumPy · SciPy · Statsmodels · Pytest · GitHub Actions
 
 A reproducible analytics workbench for a synthetic portfolio of subscription products. It is organised around one practical question:
 
 > When a product KPI moves, can the team trust the number, explain the movement, and make a defensible decision using only evidence actually available at the reporting time?
 
-The repository combines event certification, metric contracts, revenue reconciliation, point-in-time retention, forecast gates, experiment guardrails, processing-time freshness, watermark calibration, rolling SLA backtesting, uncertainty-aware certification, prospective evidence planning and evidence provenance in one auditable workflow.
+The repository combines event certification, metric contracts, revenue reconciliation, point-in-time retention, forecast gates, decision-grade experiment guardrails, processing-time freshness, watermark calibration, rolling SLA backtesting, uncertainty-aware certification, prospective evidence planning and evidence provenance in one auditable workflow.
 
 All data and results are synthetic, controlled-fault outputs or explicitly labelled planning studies. Nothing here is presented as production-company performance.
 
@@ -35,8 +35,52 @@ These statements are not interchangeable. A policy can look feasible at one snap
 | Candidate-window rows | **36** |
 | Simultaneous one-sided proportion bounds | **72** |
 | Family-wise confidence | **95%** |
-| v0.31 unit tests | **57 passed** |
-| Portable artifacts in the reference manifest | **36** |
+| Pricing experiment users | **8,000** |
+| Pricing experiment action | **HOLD** |
+| v0.32 unit tests | **63 passed** |
+| Portable artifacts in the reference manifest | **40** |
+
+## v0.32: decision-grade pricing experiment
+
+v0.32 extends the workbench from “can we trust the metric?” to “can we make a reproducible product decision from the metric?”. The controlled pricing reference contains exactly 4,000 control and 4,000 treatment users.
+
+Before treatment effects can drive a decision, assignment integrity must pass an exact two-sided binomial sample-ratio-mismatch test with expected treatment share 0.5 and `alpha = 0.001`.
+
+The primary metric is 30-day revenue. It is estimated with ANCOVA using pre-period 30-day revenue as a covariate and HC3 heteroskedasticity-robust standard errors. The primary gate requires the lower bound of a 95% two-sided confidence interval to be positive.
+
+The guardrail is 30-day paid conversion. Its treatment-control difference uses a 95% two-sided confidence interval, with a pre-specified non-inferiority margin of **-3 percentage points**. Revenue cannot compensate for a failed paid-conversion guardrail.
+
+Reference result:
+
+```text
+assignment                    4,000 control / 4,000 treatment
+SRM p-value                   1.000
+revenue effect                +£0.6851 per user over 30 days
+revenue 95% CI                [£0.5514, £0.8187]
+paid-conversion effect        -1.625 percentage points
+paid-conversion 95% CI        [-3.363, +0.113] percentage points
+paid harm margin              -3.000 percentage points
+
+assignment_integrity_gate     PASS
+revenue_gate                  PASS
+paid_guardrail_gate           FAIL
+final action                  HOLD
+```
+
+The HOLD result is intentional. The paid-conversion point estimate is inside the allowed harm margin, but its lower confidence bound crosses -3 percentage points. The experiment therefore does not have enough evidence to clear the guardrail even though the revenue result is strongly positive.
+
+Generated evidence:
+
+```text
+pricing_experiment_users.csv
+pricing_experiment_estimates.csv
+pricing_experiment_contract.json
+pricing_experiment_decision.json
+```
+
+`scripts/validate_pricing_experiment.py` reloads the user-level artifact and independently recomputes assignment balance, SRM, ANCOVA + HC3 revenue uncertainty, paid-conversion uncertainty and the final gate state. It also pins the deterministic reference effects, so a method or data change cannot silently move a public experiment claim.
+
+See [`docs/EXPERIMENT_DECISIONING.md`](docs/EXPERIMENT_DECISIONING.md).
 
 ## Hard risk budget
 
@@ -204,11 +248,14 @@ validate_uncertainty_certification.py
 validate_evidence_plan.py
   -> cycle-stable evidence-depth vs hard-gate classification
 
+validate_pricing_experiment.py
+  -> independent SRM, effect, uncertainty and decision recomputation
+
 validate_reference_claims.py
   -> pinned seed=2206, days=120 public numerical claims
 ```
 
-The evidence-plan generator and validator share the same count-jump-cycle implementation. A method or data change that moves a published boundary must fail a claim gate until the public evidence is reviewed and updated.
+The experiment validator recomputes from user-level evidence rather than trusting generated estimate artifacts. The evidence-plan generator and validator share the same count-jump-cycle implementation. A method or data change that moves a published boundary must fail a claim gate until the public evidence is reviewed and updated.
 
 ## Quick start
 
@@ -222,8 +269,10 @@ make check
 
 ## Reproducibility boundary
 
-Current numerical claims must either be regenerated by the present workflow and checked in CI or explicitly labelled as preserved historical context. The ingestion-delay process, candidate grid and risk budgets are synthetic/reference assumptions, not estimates of any real company's infrastructure.
+Current numerical claims must either be regenerated by the present workflow and checked in CI or explicitly labelled as preserved historical context. The ingestion-delay process, candidate grid, risk budgets and pricing experiment are synthetic/reference assumptions, not estimates of any real company's infrastructure or customers.
 
-The binomial uncertainty layer treats event/cell indicators as Bernoulli observations. Batch-, source- and day-level dependence is not yet included in the certification model. Prospective sample-size calculations also condition on the observed planning rates remaining representative. These are explicit model boundaries rather than hidden assumptions.
+The binomial uncertainty layer for watermark certification treats event/cell indicators as Bernoulli observations. Batch-, source- and day-level dependence is not yet included in that certification model. Prospective sample-size calculations also condition on the observed planning rates remaining representative.
 
-See [`docs/LATE_ARRIVAL_GOVERNANCE.md`](docs/LATE_ARRIVAL_GOVERNANCE.md), [`docs/WATERMARK_CALIBRATION.md`](docs/WATERMARK_CALIBRATION.md), [`docs/WATERMARK_STABILITY.md`](docs/WATERMARK_STABILITY.md), [`docs/WATERMARK_UNCERTAINTY.md`](docs/WATERMARK_UNCERTAINTY.md), [`docs/CERTIFICATION_EVIDENCE_PLANNING.md`](docs/CERTIFICATION_EVIDENCE_PLANNING.md) and [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md).
+The v0.32 pricing experiment is a fixed-horizon analysis. Its paid-conversion interval uses a large-sample normal approximation in a reference with 4,000 users per arm and event rates away from zero and one. Sequential monitoring, repeated peeking, network interference and cross-experiment interaction are outside the v0.32 claim.
+
+See [`docs/EXPERIMENT_DECISIONING.md`](docs/EXPERIMENT_DECISIONING.md), [`docs/LATE_ARRIVAL_GOVERNANCE.md`](docs/LATE_ARRIVAL_GOVERNANCE.md), [`docs/WATERMARK_CALIBRATION.md`](docs/WATERMARK_CALIBRATION.md), [`docs/WATERMARK_STABILITY.md`](docs/WATERMARK_STABILITY.md), [`docs/WATERMARK_UNCERTAINTY.md`](docs/WATERMARK_UNCERTAINTY.md), [`docs/CERTIFICATION_EVIDENCE_PLANNING.md`](docs/CERTIFICATION_EVIDENCE_PLANNING.md) and [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md).
