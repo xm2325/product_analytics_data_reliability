@@ -48,11 +48,10 @@ class PricingDecision:
 def _validate_binary_treatment(frame: pd.DataFrame, treatment: str) -> pd.Series:
     if treatment not in frame.columns:
         raise ValueError(f"Missing treatment column: {treatment}")
-    values = frame[treatment]
+    values = pd.to_numeric(frame[treatment], errors="raise")
     if values.isna().any():
         raise ValueError("Treatment assignment cannot contain missing values")
-    observed = set(values.astype(int).unique())
-    if not observed.issubset({0, 1}):
+    if not values.isin([0, 1]).all():
         raise ValueError("Treatment assignment must be binary 0/1")
     return values.astype(int)
 
@@ -90,9 +89,14 @@ def assignment_integrity(
 
 
 def difference_in_means(frame: pd.DataFrame, outcome: str, treatment: str = "treatment") -> EffectEstimate:
-    _validate_binary_treatment(frame, treatment)
-    control = frame.loc[frame[treatment].eq(0), outcome].astype(float)
-    treated = frame.loc[frame[treatment].eq(1), outcome].astype(float)
+    assignment = _validate_binary_treatment(frame, treatment)
+    if outcome not in frame.columns:
+        raise ValueError(f"Missing outcome column: {outcome}")
+    values = pd.to_numeric(frame[outcome], errors="raise")
+    if values.isna().any():
+        raise ValueError(f"{outcome} cannot contain missing values")
+    control = values.loc[assignment.eq(0)].astype(float)
+    treated = values.loc[assignment.eq(1)].astype(float)
     if len(control) < 2 or len(treated) < 2:
         raise ValueError("Need at least two observations per arm")
     effect = float(treated.mean() - control.mean())
@@ -102,9 +106,11 @@ def difference_in_means(frame: pd.DataFrame, outcome: str, treatment: str = "tre
 
 
 def difference_in_proportions(frame: pd.DataFrame, outcome: str, treatment: str = "treatment") -> EffectEstimate:
-    values = frame[outcome].dropna().astype(float)
-    if not values.isin([0.0, 1.0]).all():
-        raise ValueError(f"{outcome} must contain binary 0/1 values")
+    if outcome not in frame.columns:
+        raise ValueError(f"Missing outcome column: {outcome}")
+    values = pd.to_numeric(frame[outcome], errors="raise")
+    if values.isna().any() or not values.isin([0.0, 1.0]).all():
+        raise ValueError(f"{outcome} must contain non-missing binary 0/1 values")
     return difference_in_means(frame, outcome=outcome, treatment=treatment)
 
 
