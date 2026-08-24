@@ -20,12 +20,14 @@ jobs:
           pip install -e .
       - name: Unit tests
         run: pytest -q
-      - name: Build v0.34 reference evidence
+      - name: Build v0.35 reference evidence
         run: python scripts/build_reference.py --days 120 --output-dir build/ci-reference
       - name: Validate reference evidence
         run: python scripts/validate_build.py build/ci-reference
       - name: Validate forecast decision plan
         run: python scripts/validate_forecast_plan.py build/ci-reference
+      - name: Validate contract migration governance
+        run: python scripts/validate_contract_migration.py build/ci-reference
       - name: Validate watermark backtest
         run: python scripts/validate_watermark_backtest.py build/ci-reference
       - name: Validate uncertainty certification
@@ -45,6 +47,9 @@ jobs:
           ls -lh build/ci-reference
           cat build/ci-reference/forecast_contract.json
           cat build/ci-reference/forecast_evaluations.csv
+          cat build/ci-reference/migration_decisions.json
+          cat build/ci-reference/metric_change_impact.csv
+          cat build/ci-reference/migration_forecast_impact.csv
           cat build/ci-reference/quality_report.json
           cat build/ci-reference/pricing_experiment_decision.json
           cat build/ci-reference/pricing_guardrail_evidence_plan.json
