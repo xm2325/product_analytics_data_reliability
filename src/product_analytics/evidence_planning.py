@@ -252,12 +252,16 @@ def certification_evidence_plan(
 
 
 def select_evidence_plan(plan: pd.DataFrame) -> dict[str, object]:
-    """Identify the shortest candidate whose certification gap is evidence-only."""
+    """Identify the shortest candidate whose certification gap is evidence-only.
+
+    Calendar years are a presentation-only derivative of calendar days. The
+    selector therefore does not require a precomputed years column from callers.
+    """
     required = {
         "allowed_lateness_hours",
         "evidence_only_addressable",
         "estimated_calendar_days_for_both_proportions",
-        "estimated_calendar_years_for_both_proportions",
+        "planning_interpretation",
     }
     missing = required.difference(plan.columns)
     if missing:
@@ -266,6 +270,17 @@ def select_evidence_plan(plan: pd.DataFrame) -> dict[str, object]:
         "allowed_lateness_hours"
     )
     selected = None if eligible.empty else eligible.iloc[0]
+    if selected is None:
+        selected_days = None
+        selected_years = None
+    else:
+        selected_days = int(selected["estimated_calendar_days_for_both_proportions"])
+        if "estimated_calendar_years_for_both_proportions" in plan.columns and pd.notna(
+            selected.get("estimated_calendar_years_for_both_proportions")
+        ):
+            selected_years = float(selected["estimated_calendar_years_for_both_proportions"])
+        else:
+            selected_years = selected_days / 365.25
     return {
         "version": "1.1",
         "selection_rule": "shortest candidate whose current certification gap can be addressed by additional proportional evidence alone under the unchanged hard gates",
@@ -273,11 +288,7 @@ def select_evidence_plan(plan: pd.DataFrame) -> dict[str, object]:
         "budget_relaxed_for_planning": False,
         "status": "selected" if selected is not None else "no_candidate_evidence_only_addressable",
         "selected_lateness_hours": None if selected is None else float(selected["allowed_lateness_hours"]),
-        "estimated_calendar_days_for_both_proportions": None
-        if selected is None
-        else int(selected["estimated_calendar_days_for_both_proportions"]),
-        "estimated_calendar_years_for_both_proportions": None
-        if selected is None
-        else float(selected["estimated_calendar_years_for_both_proportions"]),
+        "estimated_calendar_days_for_both_proportions": selected_days,
+        "estimated_calendar_years_for_both_proportions": selected_years,
         "interpretation": None if selected is None else str(selected["planning_interpretation"]),
     }
