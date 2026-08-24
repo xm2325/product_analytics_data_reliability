@@ -11,5 +11,10 @@ def test_count_jump_cycle_keeps_noninteger_reciprocal_ceiling():
     assert count_jump_cycle_trials(0.004863617458038721) == 206
 
 
+def test_count_jump_cycle_does_not_round_a_genuine_near_integer_upward_boundary_down():
+    rate = 1.0 / 135.00000000001
+    assert count_jump_cycle_trials(rate) == 136
+
+
 def test_count_jump_cycle_zero_rate_uses_single_trial_cycle():
     assert count_jump_cycle_trials(0.0) == 1
