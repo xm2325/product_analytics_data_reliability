@@ -1,4 +1,4 @@
-.PHONY: install reference validate validate-forecast validate-migration validate-watermark validate-uncertainty validate-evidence validate-experiment validate-impact validate-reference validate-static-claims test check clean
+.PHONY: install reference validate validate-forecast validate-migration validate-watermark validate-uncertainty validate-evidence validate-experiment validate-impact validate-reference validate-static-claims real-reference real-validate real-static-claims real-check test check clean
 
 install:
 	python -m pip install -r requirements.txt
@@ -36,6 +36,17 @@ validate-reference:
 
 validate-static-claims:
 	python scripts/validate_static_claim_ledger.py build/reference
+
+real-reference:
+	python scripts/build_real_retail_reference.py --output-dir build/real-retail
+
+real-validate:
+	python scripts/validate_real_retail_reference.py build/real-retail
+
+real-static-claims:
+	python scripts/validate_real_static_claims.py build/real-retail
+
+real-check: real-reference real-validate real-static-claims
 
 test:
 	pytest -q

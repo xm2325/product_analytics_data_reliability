@@ -1,3 +1,3 @@
 """Product analytics and data reliability workbench."""
 
-__version__ = "0.35.0"
+__version__ = "0.36.0"
