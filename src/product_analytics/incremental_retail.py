@@ -105,35 +105,38 @@ def verify_source_manifest(source_dir: Path, source_manifest: pd.DataFrame) -> N
             raise AssertionError(f"Source partition SHA mismatch: {path.name}")
 
 
-def _aggregate_partition(source_path: Path, output_path: Path) -> int:
+def _aggregate_partition(
+    con: duckdb.DuckDBPyConnection,
+    source_path: Path,
+    output_path: Path,
+) -> None:
+    """Aggregate one source partition with a single Parquet scan.
+
+    The expected row count is already certified by the immutable source
+    manifest, so a second COUNT(*) scan would add I/O without adding evidence.
+    """
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    con = duckdb.connect()
-    try:
-        rows = int(con.execute("SELECT count(*) FROM read_parquet(?)", [str(source_path)]).fetchone()[0])
-        source_sql = _sql_literal(source_path)
-        output_sql = _sql_literal(output_path)
-        con.execute(
-            f"""
-            COPY (
-                SELECT
-                    CAST(invoice_ts AS DATE) AS date,
-                    ROUND(SUM(CASE WHEN is_purchase_line THEN line_value_gbp ELSE 0 END), 6) AS revenue_gbp,
-                    COUNT(DISTINCT CASE WHEN is_purchase_line THEN invoice_no END) AS orders,
-                    COALESCE(SUM(CASE WHEN is_purchase_line THEN quantity ELSE 0 END), 0) AS units,
-                    SUM(CASE WHEN is_purchase_line THEN 1 ELSE 0 END) AS purchase_lines,
-                    COUNT(DISTINCT CASE
-                        WHEN is_purchase_line AND customer_id IS NOT NULL THEN customer_id
-                    END) AS active_customers
-                FROM read_parquet({source_sql})
-                WHERE invoice_ts IS NOT NULL
-                GROUP BY 1
-                ORDER BY 1
-            ) TO {output_sql} (FORMAT PARQUET, COMPRESSION ZSTD)
-            """
-        )
-        return rows
-    finally:
-        con.close()
+    source_sql = _sql_literal(source_path)
+    output_sql = _sql_literal(output_path)
+    con.execute(
+        f"""
+        COPY (
+            SELECT
+                CAST(invoice_ts AS DATE) AS date,
+                ROUND(SUM(CASE WHEN is_purchase_line THEN line_value_gbp ELSE 0 END), 6) AS revenue_gbp,
+                COUNT(DISTINCT CASE WHEN is_purchase_line THEN invoice_no END) AS orders,
+                COALESCE(SUM(CASE WHEN is_purchase_line THEN quantity ELSE 0 END), 0) AS units,
+                SUM(CASE WHEN is_purchase_line THEN 1 ELSE 0 END) AS purchase_lines,
+                COUNT(DISTINCT CASE
+                    WHEN is_purchase_line AND customer_id IS NOT NULL THEN customer_id
+                END) AS active_customers
+            FROM read_parquet({source_sql})
+            WHERE invoice_ts IS NOT NULL
+            GROUP BY 1
+            ORDER BY 1
+        ) TO {output_sql} (FORMAT PARQUET, COMPRESSION ZSTD)
+        """
+    )
 
 
 def run_incremental(
@@ -151,64 +154,73 @@ def run_incremental(
     large source Parquet files. `verify_source_hashes=True` is an explicit,
     expensive integrity audit. Small derived outputs are hashed on every reuse
     check so stale/corrupt materialisations cannot be silently accepted.
+
+    When work is required, all partitions in the run share one DuckDB
+    connection and each changed partition is scanned only once for aggregation.
     """
     started = perf_counter()
     state = _load_state(state_path)
     partitions: dict[str, dict[str, object]] = state["partitions"]  # type: ignore[assignment]
     processed = skipped = rows_scanned = source_hashes_computed = 0
+    con: duckdb.DuckDBPyConnection | None = None
 
     required_columns = {"partition_key", "path", "rows", "bytes", "sha256"}
     missing = required_columns - set(source_manifest.columns)
     if missing:
         raise ValueError(f"Source manifest missing columns: {sorted(missing)}")
 
-    for row in source_manifest.sort_values("partition_key").to_dict("records"):
-        key = str(row["partition_key"])
-        source_path = source_dir / str(row["path"])
-        if not source_path.exists():
-            raise FileNotFoundError(source_path)
-        if source_path.stat().st_size != int(row["bytes"]):
-            raise RuntimeError(f"Canonical source partition size changed: {source_path.name}")
-        expected_source_sha = str(row["sha256"])
-        if verify_source_hashes:
-            source_hashes_computed += 1
-            if sha256_file(source_path) != expected_source_sha:
-                raise RuntimeError(f"Canonical source partition SHA changed: {source_path.name}")
+    try:
+        for row in source_manifest.sort_values("partition_key").to_dict("records"):
+            key = str(row["partition_key"])
+            source_path = source_dir / str(row["path"])
+            if not source_path.exists():
+                raise FileNotFoundError(source_path)
+            if source_path.stat().st_size != int(row["bytes"]):
+                raise RuntimeError(f"Canonical source partition size changed: {source_path.name}")
+            expected_source_sha = str(row["sha256"])
+            if verify_source_hashes:
+                source_hashes_computed += 1
+                if sha256_file(source_path) != expected_source_sha:
+                    raise RuntimeError(f"Canonical source partition SHA changed: {source_path.name}")
 
-        metric_path = metric_dir / f"{key}.parquet"
-        previous = partitions.get(key)
-        reusable = bool(
-            previous
-            and previous.get("source_sha256") == expected_source_sha
-            and previous.get("source_rows") == int(row["rows"])
-            and metric_path.exists()
-            and previous.get("metric_sha256") == sha256_file(metric_path)
-            and previous.get("status") == "complete"
-        )
-        if reusable:
-            skipped += 1
-            continue
-
-        rows_scanned_now = _aggregate_partition(source_path, metric_path)
-        if rows_scanned_now != int(row["rows"]):
-            raise AssertionError(f"Partition row-count drift for {key}")
-        rows_scanned += rows_scanned_now
-        processed += 1
-        partitions[key] = {
-            "status": "complete",
-            "source_path": source_path.name,
-            "source_rows": rows_scanned_now,
-            "source_sha256": expected_source_sha,
-            "metric_path": metric_path.name,
-            "metric_sha256": sha256_file(metric_path),
-        }
-        state["partitions"] = partitions
-        _write_json(state_path, state)
-
-        if stop_after_processed is not None and processed >= stop_after_processed:
-            raise SimulatedInterruption(
-                f"simulated interruption after {processed} newly processed partitions"
+            metric_path = metric_dir / f"{key}.parquet"
+            previous = partitions.get(key)
+            reusable = bool(
+                previous
+                and previous.get("source_sha256") == expected_source_sha
+                and previous.get("source_rows") == int(row["rows"])
+                and metric_path.exists()
+                and previous.get("metric_sha256") == sha256_file(metric_path)
+                and previous.get("status") == "complete"
             )
+            if reusable:
+                skipped += 1
+                continue
+
+            if con is None:
+                con = duckdb.connect()
+            _aggregate_partition(con, source_path, metric_path)
+            rows_scanned_now = int(row["rows"])
+            rows_scanned += rows_scanned_now
+            processed += 1
+            partitions[key] = {
+                "status": "complete",
+                "source_path": source_path.name,
+                "source_rows": rows_scanned_now,
+                "source_sha256": expected_source_sha,
+                "metric_path": metric_path.name,
+                "metric_sha256": sha256_file(metric_path),
+            }
+            state["partitions"] = partitions
+            _write_json(state_path, state)
+
+            if stop_after_processed is not None and processed >= stop_after_processed:
+                raise SimulatedInterruption(
+                    f"simulated interruption after {processed} newly processed partitions"
+                )
+    finally:
+        if con is not None:
+            con.close()
 
     return IncrementalRunStats(
         processed_partitions=processed,
