@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from math import ceil
+from math import ceil, isclose
 
 import pandas as pd
 
@@ -10,6 +10,32 @@ from .uncertainty import DEFAULT_FAMILY_ALPHA, exact_binomial_upper
 
 
 DEFAULT_MAX_PLANNING_TRIALS = 100_000_000
+RECIPROCAL_INTEGER_TOLERANCE = 1e-12
+
+
+def count_jump_cycle_trials(rate: float) -> int:
+    """Return the ceil(1/rate) audit cycle without float-boundary drift.
+
+    CSV and pandas round-trips can move an exact reciprocal integer by a few
+    ulps, for example turning 135 into 135.00000000000003. Treat only values
+    within a strict numerical tolerance of an integer as that integer; all
+    other values retain the conservative ceil(1/rate) rule.
+    """
+    rate = float(rate)
+    if not 0 <= rate <= 1:
+        raise ValueError("rate must be between 0 and 1")
+    if rate == 0:
+        return 1
+    reciprocal = 1.0 / rate
+    nearest_integer = round(reciprocal)
+    if isclose(
+        reciprocal,
+        float(nearest_integer),
+        rel_tol=RECIPROCAL_INTEGER_TOLERANCE,
+        abs_tol=RECIPROCAL_INTEGER_TOLERANCE,
+    ):
+        return max(1, int(nearest_integer))
+    return max(1, int(ceil(reciprocal)))
 
 
 def _planned_successes(rate: float, trials: int) -> int:
@@ -73,7 +99,7 @@ def required_trials_for_exact_upper(
         else:
             left = mid
 
-    period = int(ceil(1.0 / planning_rate)) if planning_rate > 0 else 1
+    period = count_jump_cycle_trials(planning_rate)
     scan_start = max(1, right - max(5000, 4 * period))
     for n in range(scan_start, right + 1):
         if _exact_target_passes(planning_rate, n, limit, alpha):
@@ -123,7 +149,7 @@ def cycle_stable_trials_for_exact_upper(
     if first is None:
         return None
 
-    cycle = max(1, int(ceil(1.0 / planning_rate))) if planning_rate > 0 else 1
+    cycle = count_jump_cycle_trials(planning_rate)
     candidate = int(first)
     while candidate + cycle <= max_trials:
         first_failure: int | None = None
