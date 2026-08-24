@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from product_analytics.experiments import (
     AssignmentIntegrity,
@@ -28,6 +29,12 @@ def test_assignment_integrity_accepts_exact_balance():
     assert integrity.n_treatment == 100
     assert integrity.p_value == 1.0
     assert integrity.passes
+
+
+def test_assignment_integrity_rejects_fractional_assignment():
+    frame = pd.DataFrame({"treatment": [0.0, 0.5, 1.0, 1.0]})
+    with pytest.raises(ValueError, match="binary 0/1"):
+        assignment_integrity(frame)
 
 
 def test_sample_ratio_mismatch_invalidates_decision():
