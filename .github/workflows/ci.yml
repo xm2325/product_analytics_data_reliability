@@ -34,6 +34,8 @@ jobs:
         run: python scripts/validate_pricing_experiment.py build/ci-reference
       - name: Validate pinned reference claims
         run: python scripts/validate_reference_claims.py build/ci-reference
+      - name: Validate checked-in public claim ledger
+        run: python scripts/validate_static_claim_ledger.py build/ci-reference
       - name: Show generated evidence inventory
         run: |
           ls -lh build/ci-reference
