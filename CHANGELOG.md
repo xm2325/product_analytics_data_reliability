@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.31.0
+
+- replaced single-point prospective exact-bound targets with cycle-stable targets that must remain passing across the next full `ceil(1 / planning_rate)` adverse-count jump cycle;
+- made the statistical claim boundary explicit with `global_monotonic_threshold_claimed = false` rather than implying that all larger sample sizes necessarily pass;
+- introduced one shared count-jump-cycle function for the generator and validator, with a strict float-boundary tolerance for reciprocal integers after CSV/pandas round-trips;
+- added regression tests for the 135- and 333-position reciprocal boundaries and for genuine non-integer cycles;
+- updated the deterministic reference targets: 48h late events **99,573,018**, 72h revised cells **14,989**, 96h late events **2,733,153**, 96h revised cells **2,011**, and 96h combined planning depth **1,330 days (~3.64 years)**;
+- pinned the 96h audited cycles at **206 late-event positions** and **333 revised-cell positions** in the public claim validator;
+- aligned the reference-summary version with package version **0.31.0** and updated public evidence documentation;
+- increased the unit-test suite to **56 tests** while retaining the full build, rolling-backtest, uncertainty, evidence-plan and pinned-claim validation chain.
+
+## v0.30.0
+
+- added prospective certification evidence planning after the v0.29 family-wise analysis returned no certified candidate;
+- separated underlying rate failures and deterministic hard-gate breaches from gaps that can be addressed by more proportional evidence alone;
+- retained the 72 simultaneous one-sided bounds, unchanged risk budget and no weighted score;
+- identified 96h as the only evidence-depth-only candidate under the reference assumptions;
+- reported the original single-point 96h planning target of **2,718,757 events**, **1,853 KPI cells** and **1,323 days** of evidence depth.
+
+## v0.29.0
+
+- added one-sided exact Clopper–Pearson upper bounds for late-event and revised-KPI-cell proportions across all candidate-window rows;
+- applied a 95% family-wise Bonferroni rule over **72 simultaneous one-sided bounds**;
+- kept deterministic revenue and paid-subscription maximum revisions as separate hard gates;
+- showed that no candidate is statistically certified under the declared family-wise rule even though 96h is observed feasible in every rolling window.
+
+## v0.28.0
+
+- added nine weekly processing-time snapshots and rolling watermark-policy backtesting;
+- separated final-snapshot feasibility from all-window observed stability;
+- identified **48h** as the shortest feasible candidate at the final snapshot and **96h** as the shortest candidate feasible in all nine rolling windows;
+- added rolling-policy validators and machine-readable stability evidence.
+
 ## v0.25.0
 
 - introduced an auditable retention-maturity ledger for every product × cohort-date × D7/D30 horizon;
