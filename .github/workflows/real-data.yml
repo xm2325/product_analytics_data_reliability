@@ -9,8 +9,11 @@ on:
       - 'pyproject.toml'
       - 'src/product_analytics/forecasting.py'
       - 'src/product_analytics/real_retail.py'
+      - 'src/product_analytics/real_source_contract.py'
       - 'scripts/build_real_retail_reference.py'
       - 'scripts/validate_real_retail_reference.py'
+      - 'scripts/validate_real_static_claims.py'
+      - 'results/real_data_reference_summary.csv'
       - 'tests/test_real_retail.py'
   pull_request:
     paths:
@@ -19,8 +22,11 @@ on:
       - 'pyproject.toml'
       - 'src/product_analytics/forecasting.py'
       - 'src/product_analytics/real_retail.py'
+      - 'src/product_analytics/real_source_contract.py'
       - 'scripts/build_real_retail_reference.py'
       - 'scripts/validate_real_retail_reference.py'
+      - 'scripts/validate_real_static_claims.py'
+      - 'results/real_data_reference_summary.csv'
       - 'tests/test_real_retail.py'
 
 jobs:
@@ -40,10 +46,12 @@ jobs:
           pip install -e .
       - name: Real-data unit tests
         run: pytest -q tests/test_real_retail.py
-      - name: Download official UCI source and build evidence
+      - name: Download pinned official UCI source and build evidence
         run: python scripts/build_real_retail_reference.py --output-dir build/real-retail
       - name: Independently validate real-data evidence
         run: python scripts/validate_real_retail_reference.py build/real-retail
+      - name: Validate checked-in real-data claims
+        run: python scripts/validate_real_static_claims.py build/real-retail
       - name: Show real-data evidence
         run: |
           cat build/real-retail/real_source_provenance.json
