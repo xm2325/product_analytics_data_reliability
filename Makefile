@@ -1,4 +1,4 @@
-.PHONY: install reference validate validate-forecast validate-watermark validate-uncertainty validate-evidence validate-experiment validate-impact validate-reference validate-static-claims test check clean
+.PHONY: install reference validate validate-forecast validate-migration validate-watermark validate-uncertainty validate-evidence validate-experiment validate-impact validate-reference validate-static-claims test check clean
 
 install:
 	python -m pip install -r requirements.txt
@@ -12,6 +12,9 @@ validate:
 
 validate-forecast:
 	python scripts/validate_forecast_plan.py build/reference
+
+validate-migration:
+	python scripts/validate_contract_migration.py build/reference
 
 validate-watermark:
 	python scripts/validate_watermark_backtest.py build/reference
@@ -37,7 +40,7 @@ validate-static-claims:
 test:
 	pytest -q
 
-check: test reference validate validate-forecast validate-watermark validate-uncertainty validate-evidence validate-experiment validate-impact validate-reference validate-static-claims
+check: test reference validate validate-forecast validate-migration validate-watermark validate-uncertainty validate-evidence validate-experiment validate-impact validate-reference validate-static-claims
 
 clean:
 	rm -rf build .pytest_cache
