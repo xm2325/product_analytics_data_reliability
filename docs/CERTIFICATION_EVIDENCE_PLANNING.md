@@ -73,7 +73,7 @@ The cycle length is part of the statistical contract, so the generator and valid
 
 Rates such as `1/135` or `1/333` can round-trip through CSV/pandas so that their reciprocal becomes slightly larger than the mathematical integer. A raw `ceil(1/rate)` would then incorrectly change 135 to 136 or 333 to 334.
 
-v0.31 uses one shared `count_jump_cycle_trials()` implementation. If the reciprocal is within a strict `1e-12` numerical tolerance of an integer, it is treated as that integer. Otherwise the conservative ceiling rule is retained. Regression tests cover both integer-boundary cases and genuine non-integer cycles.
+v0.31 uses one shared `count_jump_cycle_trials()` implementation. A reciprocal is normalized to its nearest integer only when it lies within **8 floating-point units in the last place (ULPs)** of that integer. Otherwise the conservative `ceil(1/rate)` rule is retained. The reference round-trip cases are 5 ULPs from 135 and 6 ULPs from 333, while a deliberately genuine near-integer reciprocal (`135.00000000001`) remains outside the tolerance and correctly maps to 136.
 
 ## When more evidence is not a remedy
 
