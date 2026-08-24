@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 
 import pandas as pd
@@ -41,7 +42,9 @@ def validate_evidence_plan(root: Path) -> list[str]:
         "revenue_hard_gate_passes",
         "paid_hard_gate_passes",
         "required_late_event_trials",
+        "late_event_audited_cycle_trials",
         "required_revised_metric_cells",
+        "revised_cell_audited_cycle_trials",
         "late_trial_requirement_exceeds_search_cap",
         "revision_trial_requirement_exceeds_search_cap",
         "evidence_requirement_quantified",
@@ -86,8 +89,22 @@ def validate_evidence_plan(root: Path) -> list[str]:
             failures.append("eligible_missing_late_trials")
         if eligible["required_revised_metric_cells"].isna().any():
             failures.append("eligible_missing_revision_trials")
+        if eligible["late_event_audited_cycle_trials"].isna().any():
+            failures.append("eligible_missing_late_cycle")
+        if eligible["revised_cell_audited_cycle_trials"].isna().any():
+            failures.append("eligible_missing_revision_cycle")
         if eligible["estimated_calendar_days_for_both_proportions"].isna().any():
             failures.append("eligible_missing_calendar_days")
+
+    for _, row in plan.iterrows():
+        if pd.notna(row["required_late_event_trials"]):
+            expected = max(1, math.ceil(1.0 / float(row["planning_late_event_rate"])))
+            if int(row["late_event_audited_cycle_trials"]) != expected:
+                failures.append(f"late_cycle_length_{int(row['allowed_lateness_hours'])}h")
+        if pd.notna(row["required_revised_metric_cells"]):
+            expected = max(1, math.ceil(1.0 / float(row["planning_revised_metric_cell_rate"])))
+            if int(row["revised_cell_audited_cycle_trials"]) != expected:
+                failures.append(f"revision_cycle_length_{int(row['allowed_lateness_hours'])}h")
 
     rate_fail = ~late_below
     if plan.loc[rate_fail, "required_late_event_trials"].notna().any():
@@ -100,6 +117,10 @@ def validate_evidence_plan(root: Path) -> list[str]:
         failures.append("evidence_plan_weighted_score")
     if contract.get("budget_relaxed_for_planning") is not False:
         failures.append("evidence_plan_budget_relaxed")
+    if contract.get("global_monotonic_threshold_claimed") is not False:
+        failures.append("evidence_plan_claims_global_monotonicity")
+    if "cycle-stable target" not in str(contract.get("evidence_target_semantics", "")):
+        failures.append("evidence_plan_cycle_stability_contract")
     if int(contract.get("simultaneous_one_sided_bounds", -1)) != 72:
         failures.append("evidence_plan_bound_count")
     if abs(float(contract.get("per_bound_alpha", -1)) - 0.05 / 72.0) > 1e-15:
