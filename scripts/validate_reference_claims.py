@@ -14,9 +14,11 @@ REFERENCE_FEASIBLE_WINDOWS = {24.0: 0, 48.0: 5, 72.0: 8, 96.0: 9}
 REFERENCE_CERTIFIED_WINDOWS = {24.0: 0, 48.0: 0, 72.0: 0, 96.0: 0}
 REFERENCE_96H_LATE_UPPER = 0.005485099103662166
 REFERENCE_96H_REVISION_UPPER = 0.017385209176541436
-REFERENCE_96H_REQUIRED_LATE_EVENTS = 2_718_757
-REFERENCE_96H_REQUIRED_REVISION_CELLS = 1_853
-REFERENCE_96H_EVIDENCE_DAYS = 1_323
+REFERENCE_96H_REQUIRED_LATE_EVENTS = 2_733_153
+REFERENCE_96H_LATE_CYCLE = 206
+REFERENCE_96H_REQUIRED_REVISION_CELLS = 2_011
+REFERENCE_96H_REVISION_CYCLE = 333
+REFERENCE_96H_EVIDENCE_DAYS = 1_330
 
 
 def _as_bool(value: object) -> bool:
@@ -24,7 +26,7 @@ def _as_bool(value: object) -> bool:
 
 
 def validate_reference_claims(root: Path) -> list[str]:
-    """Pin deterministic v0.30 public claims separately from generic invariants."""
+    """Pin deterministic v0.31 public claims separately from generic invariants."""
     failures: list[str] = []
     required = [
         "watermark_policy_grid.csv",
@@ -41,7 +43,7 @@ def validate_reference_claims(root: Path) -> list[str]:
         "reference_summary.json",
     ]
     if any(not (root / name).is_file() for name in required):
-        return ["missing_v030_reference_evidence"]
+        return ["missing_v031_reference_evidence"]
 
     grid = pd.read_csv(root / "watermark_policy_grid.csv").sort_values("allowed_lateness_hours").reset_index(drop=True)
     decision = json.loads((root / "watermark_policy_decision.json").read_text(encoding="utf-8"))
@@ -106,7 +108,6 @@ def validate_reference_claims(root: Path) -> list[str]:
     if stable_decision.get("budget_relaxed_after_backtest") is not False:
         failures.append("reference_budget_was_relaxed_after_backtest")
 
-    # v0.29 uncertainty layer remains an unchanged prerequisite for v0.30.
     if uncertainty_contract.get("correction") != "bonferroni":
         failures.append("reference_uncertainty_correction")
     if not math.isclose(float(uncertainty_contract.get("family_confidence_level", -1)), 0.95, abs_tol=1e-15):
@@ -164,7 +165,8 @@ def validate_reference_claims(root: Path) -> list[str]:
     if certification_decision.get("budget_relaxed_after_uncertainty") is not False:
         failures.append("reference_uncertainty_budget_relaxed")
 
-    # v0.30: distinguish structural/hard-gate failures from evidence-depth gaps.
+    # v0.31: distinguish structural/hard-gate failures from evidence-depth gaps
+    # and pin the cycle-stable reference targets rather than single-point crossings.
     plan_rows = {
         float(row["allowed_lateness_hours"]): row for _, row in evidence_plan.iterrows()
     }
@@ -183,8 +185,12 @@ def validate_reference_claims(root: Path) -> list[str]:
             failures.append("reference_96h_not_evidence_only_addressable")
         if int(plan96["required_late_event_trials"]) != REFERENCE_96H_REQUIRED_LATE_EVENTS:
             failures.append("reference_96h_required_late_trials_changed")
+        if int(plan96["late_event_audited_cycle_trials"]) != REFERENCE_96H_LATE_CYCLE:
+            failures.append("reference_96h_late_cycle_changed")
         if int(plan96["required_revised_metric_cells"]) != REFERENCE_96H_REQUIRED_REVISION_CELLS:
             failures.append("reference_96h_required_revision_cells_changed")
+        if int(plan96["revised_cell_audited_cycle_trials"]) != REFERENCE_96H_REVISION_CYCLE:
+            failures.append("reference_96h_revision_cycle_changed")
         if int(plan96["estimated_calendar_days_for_both_proportions"]) != REFERENCE_96H_EVIDENCE_DAYS:
             failures.append("reference_96h_evidence_days_changed")
         if int(plan96["estimated_calendar_days_for_late_bound"]) <= int(plan96["estimated_calendar_days_for_revision_bound"]):
@@ -203,6 +209,8 @@ def validate_reference_claims(root: Path) -> list[str]:
             failures.append("reference_72h_late_requirement_no_longer_exceeds_cap")
         if _as_bool(plan72["revenue_hard_gate_passes"]):
             failures.append("reference_72h_revenue_gate_unexpectedly_passes")
+        if int(plan72["revised_cell_audited_cycle_trials"]) != 135:
+            failures.append("reference_72h_revision_cycle_changed")
 
     if int(evidence_contract.get("simultaneous_one_sided_bounds", -1)) != 72:
         failures.append("reference_evidence_plan_bound_count")
@@ -210,6 +218,8 @@ def validate_reference_claims(root: Path) -> list[str]:
         failures.append("reference_evidence_plan_weighted_score")
     if evidence_contract.get("budget_relaxed_for_planning") is not False:
         failures.append("reference_evidence_plan_budget_relaxed")
+    if evidence_contract.get("global_monotonic_threshold_claimed") is not False:
+        failures.append("reference_evidence_plan_global_monotonic_claim")
     if evidence_decision.get("status") != "selected":
         failures.append("reference_evidence_plan_decision_status")
     if float(evidence_decision.get("selected_lateness_hours", -1)) != 96.0:
@@ -221,7 +231,7 @@ def validate_reference_claims(root: Path) -> list[str]:
     if evidence_decision.get("budget_relaxed_for_planning") is not False:
         failures.append("reference_evidence_decision_budget_relaxed")
 
-    if summary.get("version") != "0.30.0":
+    if summary.get("version") != "0.31.0":
         failures.append("reference_summary_version")
     processing = summary.get("processing_time", {})
     point_in_time = processing.get("point_in_time_watermark_calibration", {})
@@ -245,7 +255,7 @@ def validate_reference_claims(root: Path) -> list[str]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Validate pinned v0.30 deterministic reference claims")
+    parser = argparse.ArgumentParser(description="Validate pinned v0.31 deterministic reference claims")
     parser.add_argument("root", nargs="?", default="build/reference")
     args = parser.parse_args()
     failures = validate_reference_claims(Path(args.root))

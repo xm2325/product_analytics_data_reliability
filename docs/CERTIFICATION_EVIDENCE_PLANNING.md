@@ -1,10 +1,12 @@
 # Certification evidence planning
 
-v0.30 answers the question left open by v0.29:
+v0.30 answered the question left open by v0.29:
 
 > If no watermark candidate is statistically certified under the declared family-wise rule, which gaps can actually be repaired by more evidence?
 
-The answer is **not** “collect more data for every candidate”. The planning layer first separates underlying-risk failures, deterministic hard-gate failures and genuine evidence-depth gaps.
+v0.31 tightens that answer at the discrete count boundary. A single passing sample size is no longer reported as an evidence target unless the exact upper bound also remains passing across the next full adverse-count jump cycle.
+
+The planning layer separates underlying-risk failures, deterministic hard-gate failures and genuine evidence-depth gaps. It does not treat “collect more data” as a universal remedy.
 
 ## Inputs carried forward unchanged
 
@@ -29,7 +31,7 @@ There is no weighted score and no post-hoc budget relaxation.
 
 ## Planning rule
 
-For each watermark candidate, v0.30 uses the **worst observed rolling-window proportional rate** as a prospective planning rate.
+For each watermark candidate, the planner uses the **worst observed rolling-window proportional rate** as a prospective planning rate.
 
 For a target trial count `n`, the planned number of adverse observations is conservatively rounded upward:
 
@@ -37,9 +39,41 @@ For a target trial count `n`, the planned number of adverse observations is cons
 x = ceil(planning_rate × n)
 ```
 
-The project then searches for an evidence size whose one-sided exact Clopper–Pearson upper bound satisfies the original proportional budget at the same per-bound alpha used by v0.29.
+The project then evaluates the one-sided exact Clopper–Pearson upper bound at the same per-bound alpha used by v0.29.
 
 This is conditional planning, not a forecast of future certification. It assumes the future risk rate and evidence throughput remain at the stated planning values.
+
+## Why v0.31 changed the target semantics
+
+With `x = ceil(p × n)`, the adverse count changes in discrete jumps. Near a crossing, increasing `n` can therefore produce a small saw-tooth reversal: one sample size passes, then a nearby larger sample size fails when `x` increments.
+
+A single passing `n` is not sufficient evidence for a threshold-style claim. v0.31 reports a target only after auditing the target and the following full count-jump cycle:
+
+```text
+cycle_trials = ceil(1 / planning_rate)
+
+candidate target
+    ↓
+audit target ... target + cycle_trials
+    ↓
+all positions pass
+    ↓
+report cycle-stable evidence target
+```
+
+This is a local discrete-stability contract. It does **not** claim that every larger possible sample size must pass forever. The machine-readable contract therefore sets:
+
+```text
+global_monotonic_threshold_claimed = false
+```
+
+## Float boundary contract
+
+The cycle length is part of the statistical contract, so the generator and validator must compute it identically after CSV serialization.
+
+Rates such as `1/135` or `1/333` can round-trip through CSV/pandas so that their reciprocal becomes slightly larger than the mathematical integer. A raw `ceil(1/rate)` would then incorrectly change 135 to 136 or 333 to 334.
+
+v0.31 uses one shared `count_jump_cycle_trials()` implementation. A reciprocal is normalized to its nearest integer only when it lies within **8 floating-point units in the last place (ULPs)** of that integer. Otherwise the conservative `ceil(1/rate)` rule is retained. The reference round-trip cases are 5 ULPs from 135 and 6 ULPs from 333, while a deliberately genuine near-integer reciprocal (`135.00000000001`) remains outside the tolerance and correctly maps to 136.
 
 ## When more evidence is not a remedy
 
@@ -50,58 +84,51 @@ planning late-event rate            < 0.50%
 planning revised-cell rate          < 1.00%
 max observed revenue revision       <= £10
 max observed paid revision          <= 1
-both exact evidence requirements    are quantifiable inside the search cap
+both cycle-stable requirements      are quantifiable inside the search cap
 ```
 
 If a point risk is already at or above budget, its asymptotic upper bound cannot be pushed below the budget by sample size alone. Likewise, more proportional observations cannot repair a deterministic maximum-revision hard-gate breach.
 
-## Reference result
+## v0.31 reference result
 
 The seed-2206, 120-day reference produces:
 
-| Candidate | Late planning rate | Revised-cell planning rate | Max revenue revision | Classification |
-|---|---:|---:|---:|---|
-| 24h | 6.9516% | 1.9400% | £23.98 | structural/hard-gate failure |
-| 48h | 0.4977% | 1.2882% | £11.99 | independent rate + hard-gate failures |
-| 72h | 0.4999% | 0.7407% | £11.99 | hard-gate failure; late requirement beyond search cap |
-| 96h | 0.4864% | 0.3003% | £0.00 | **evidence-depth-only** |
+| Candidate | Main evidence result | Audited cycle | Classification |
+|---|---:|---:|---|
+| 24h | late 6.9516%, revised cells 1.9400%, max revenue £23.98 | — | structural/hard-gate failure |
+| 48h | late target 99,573,018 events; revised cells 1.2882%, max revenue £11.99 | 201 late-event positions | independent rate + hard-gate failures |
+| 72h | revised-cell target 14,989; late target beyond 100M cap; max revenue £11.99 | 135 revised-cell positions | hard-gate failure + late search-cap failure |
+| 96h | 2,733,153 events and 2,011 KPI cells | 206 late-event / 333 revised-cell positions | **evidence-depth-only** |
 
-The 96-hour candidate is therefore the only candidate selected by the prospective planning rule.
+The 96-hour candidate remains the only candidate selected by the prospective planning rule.
 
-### 96h evidence requirement
+### 96h cycle-stable evidence requirement
 
 ```text
-required finalizable-event trials  = 2,718,757
-required finalized KPI cells       = 1,853
+required finalizable-event trials   = 2,733,153
+late-event audited cycle            = 206 trial positions
+required finalized KPI cells        = 2,011
+revised-cell audited cycle           = 333 trial positions
 median finalizable-event throughput ~= 2,055.6/day
-median KPI-cell throughput          = 9/day
-late-event evidence depth           = 1,323 days
-revised-cell evidence depth         = 206 days
-combined planning depth             = 1,323 days (~3.62 years)
+median KPI-cell throughput           = 9/day
+late-event evidence depth            = 1,330 days
+revised-cell evidence depth          = 224 days
+combined planning depth              = 1,330 days (~3.64 years)
 ```
 
-The late-event upper bound is the bottleneck.
+The late-event upper bound remains the planning bottleneck.
 
-This is intentionally a **negative operational result**. Under the current synthetic rates and very conservative 95% family-wise certification rule, passively accumulating evidence for roughly 3.6 years is not an attractive strategy. The planning layer exposes that problem rather than hiding it by relaxing alpha or the risk budget.
+The change from the v0.30 single-point targets is small in business terms but important in claim semantics:
 
-## Why 48h and 72h are not sample-size problems
+| Component | v0.30 single passing point | v0.31 cycle-stable target |
+|---|---:|---:|
+| 48h late events | 99,546,369 | **99,573,018** |
+| 72h revised cells | 14,299 | **14,989** |
+| 96h late events | 2,718,757 | **2,733,153** |
+| 96h revised cells | 1,853 | **2,011** |
+| 96h combined evidence depth | 1,323 days | **1,330 days** |
 
-For 48h, the late-event rate is just below the proportional budget, but:
-
-```text
-worst revised-cell rate = 1.2882% > 1.00%
-max revenue revision    = £11.99  > £10
-```
-
-Even the late-event proportion alone would require roughly 99.55 million finalizable events under the planning rule. But that number is not presented as a remedy because other constraints already fail.
-
-For 72h:
-
-```text
-max revenue revision = £11.99 > £10
-```
-
-and the late-event evidence requirement is above the declared 100,000,000-trial search cap. The revised-cell proportion alone needs about 14,299 cells, or roughly 1,589 days at nine finalized KPI cells per day, but satisfying that one component would still not repair the candidate.
+The project does not hide this correction just because the overall operating conclusion stays the same.
 
 ## Machine-readable artifacts
 
@@ -113,24 +140,15 @@ watermark_evidence_plan_contract.json
 watermark_evidence_plan_decision.json
 ```
 
-The plan records candidate-level rates, deterministic gates, exact evidence requirements, throughput, approximate evidence depth, search-cap status and the final `evidence_only_addressable` classification.
+The plan records candidate-level rates, deterministic gates, exact cycle-stable evidence requirements, audited cycle lengths, throughput, approximate evidence depth, search-cap status and the final `evidence_only_addressable` classification.
 
-The contract records the family alpha, count rule, search cap, unchanged risk budget and interpretation limits. The decision selects the shortest candidate whose current gap is evidence-depth-only.
+The contract records the family alpha, count rule, cycle semantics, search cap, unchanged risk budget and interpretation limits. The decision selects the shortest candidate whose current gap is evidence-depth-only.
 
 ## CI contract
 
-`validate_evidence_plan.py` checks:
+`validate_evidence_plan.py` checks the candidate set, component accounting, search-cap consistency, cycle lengths, positive throughput, unchanged hard constraints and shortest eligible-candidate selection. It imports the same count-jump-cycle function used by the generator, so serialization cannot silently create a second statistical definition.
 
-- the candidate set and required fields;
-- component accounting for `evidence_only_addressable`;
-- exact-evidence quantification and search-cap consistency;
-- no sample plan for a proportional rate already at/above budget;
-- positive evidence throughput;
-- no weighted score;
-- no budget relaxation;
-- shortest eligible-candidate selection.
-
-`validate_reference_claims.py` separately pins the deterministic v0.30 reference values so public numerical claims cannot silently drift.
+`validate_reference_claims.py` separately pins the deterministic v0.31 values, including the 96h cycle-stable targets and audited cycle lengths. A changed statistical boundary therefore has to be reviewed and updated explicitly before CI becomes green.
 
 ## Interpretation boundary
 
@@ -141,4 +159,4 @@ The planning calculation is not a production SLA recommendation and is not a gua
 - the binomial/Bernoulli interpretation used by the Clopper–Pearson layer remains appropriate;
 - the candidate set and risk budget remain pre-specified.
 
-Batch-, source- and day-level dependence is still outside the current binomial certification model. A later cluster-aware analysis is allowed to increase or decrease the evidence requirement; it must not be tuned merely to obtain a desired SLA.
+Batch-, source- and day-level dependence is still outside the current binomial certification model. A later cluster-aware analysis may change the evidence requirement, but it must be specified on statistical grounds rather than selected to obtain a desired SLA.

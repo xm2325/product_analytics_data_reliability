@@ -48,7 +48,7 @@ from product_analytics.uncertainty import (
 )
 
 
-VERSION = "0.30.0"
+VERSION = "0.31.0"
 
 
 def _write_json(path: Path, payload: object) -> None:
@@ -231,8 +231,8 @@ def main() -> None:
     _write_json(certification_decision_path, certification_decision)
     outputs.append(certification_decision_path)
 
-    # v0.30: translate the v0.29 no-certification result into a prospective
-    # evidence plan without loosening confidence, risk budgets or hard gates.
+    # v0.31: translate the v0.29 no-certification result into a prospective
+    # cycle-stable evidence plan without loosening confidence, risk budgets or hard gates.
     evidence_plan, evidence_plan_contract = certification_evidence_plan(
         rolling_grid,
         family_alpha=DEFAULT_FAMILY_ALPHA,

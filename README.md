@@ -1,6 +1,6 @@
 # Product Analytics & Data Reliability Workbench
 
-**Version:** v0.30  
+**Version:** v0.31  
 **Stack:** Python · DuckDB · SQL · Pandas · NumPy · SciPy · Statsmodels · Pytest · GitHub Actions
 
 A reproducible analytics workbench for a synthetic portfolio of subscription products. It is organised around one practical question:
@@ -18,8 +18,8 @@ The deterministic reference uses `seed=2206`, `days=120`. Freshness decisions ar
 ```text
 48h   = shortest feasible candidate at the final 2026-04-30 snapshot
 96h   = shortest candidate observed feasible in all 9 rolling windows
-none  = candidate certified at 95% family-wise confidence under v0.29
-96h   = only candidate whose current certification gap is evidence-depth-only in v0.30
+none  = candidate certified at 95% family-wise confidence
+96h   = only candidate whose current certification gap is evidence-depth-only
 ```
 
 These statements are not interchangeable. A policy can look feasible at one snapshot, remain feasible across observed windows, and still lack enough information for a simultaneous confidence claim.
@@ -35,8 +35,8 @@ These statements are not interchangeable. A policy can look feasible at one snap
 | Candidate-window rows | **36** |
 | Simultaneous one-sided proportion bounds | **72** |
 | Family-wise confidence | **95%** |
-| Current v0.30 unit tests | **51 passed** in the first full reference build |
-| Portable artifacts in the v0.30 build manifest | **36** |
+| v0.31 unit tests | **57 passed** |
+| Portable artifacts in the reference manifest | **36** |
 
 ## Hard risk budget
 
@@ -51,73 +51,88 @@ max |paid-subscription revision|              <= 1
 
 There is no weighted score and no post-hoc relaxation. A revenue hard-gate breach cannot be compensated by a lower late-event rate.
 
-## v0.30: when is “collect more data” actually a valid remedy?
+## v0.31: cycle-stable exact evidence targets
 
-v0.29 found no statistically certified candidate under a 95% family-wise Bonferroni analysis. v0.30 does not automatically respond by asking for a larger sample. It first separates three different situations:
+v0.30 asked whether a failed statistical certification could actually be repaired by collecting more evidence. It found that only the 96h candidate was an evidence-depth-only case.
 
-1. the underlying point risk is already at or above its budget;
-2. a deterministic maximum-revision hard gate is already breached;
-3. the point risks and hard gates pass, but the simultaneous confidence bounds are still too wide.
-
-Only the third case is treated as an **evidence-depth problem**.
-
-For proportional constraints, v0.30 uses each candidate's worst observed rolling-window rate as a prospective planning rate and keeps the v0.29 family unchanged:
+v0.31 fixes a discrete statistical issue in the prospective sample-size calculation. The planning count is
 
 ```text
-4 candidates × 9 windows × 2 proportions = 72 bounds
-family alpha = 0.05
-per-bound alpha = 0.05 / 72
+x = ceil(planning_rate × n)
 ```
 
-The planning calculation uses a one-sided exact Clopper–Pearson upper bound and the conservative count rule:
+so `x` changes in jumps. Near a crossing, one sample size can pass an exact upper-bound limit while a nearby larger sample size fails after the adverse count increments. A single passing `n` is therefore not reported as a threshold.
+
+The v0.31 rule is:
 
 ```text
-planned failures = ceil(planning_rate × trials)
+find a passing n
+    ↓
+compute the count-jump cycle ceil(1 / planning_rate)
+    ↓
+audit n through n + cycle
+    ↓
+report n only if every audited position passes
 ```
 
-### Prospective evidence plan
-
-| Candidate | Main problem | Evidence-only addressable? | Planning implication |
-|---|---|---|---|
-| 24h | late rate 6.95%, revised-cell rate 1.94%, max revenue revision £23.98 | **No** | underlying risks/hard gate already fail |
-| 48h | revised-cell rate 1.29%, max revenue revision £11.99 | **No** | more late-event observations cannot repair independent failures |
-| 72h | max revenue revision £11.99; late-event requirement exceeds 100M-trial search cap | **No** | not a simple sample-depth problem |
-| 96h | point risks below budget; max revenue/paid revisions 0 | **Yes** | current gap is statistical evidence depth under the stated model |
-
-For the 96-hour candidate, the reference planning calculation gives:
+The machine-readable contract explicitly records:
 
 ```text
-required finalizable-event trials  ~= 2,718,757
-required finalized KPI cells       ~= 1,853
-median event throughput             ~= 2,056 / day
-median KPI-cell throughput          = 9 / day
-late-event-bound evidence depth     ~= 1,323 days
-revised-cell-bound evidence depth   ~= 206 days
-combined planning depth             ~= 1,323 days (~3.62 years)
+global_monotonic_threshold_claimed = false
 ```
 
-The late-event proportion is therefore the planning bottleneck.
+This is a local cycle-stability claim, not a statement that every larger sample size must pass forever.
 
-**The 1,323-day value is not a promise that waiting 1,323 additional calendar days will certify 96h.** It conditions on future risk rates, throughput and the statistical model remaining at the stated planning values. Its practical purpose is to reveal that passive evidence accumulation is a poor strategy under this very strict family-wise rule.
+### Shared float-boundary semantics
 
-Generated v0.30 evidence:
+The cycle length is computed by one shared `count_jump_cycle_trials()` function used by both the evidence generator and the validator. This prevents CSV/pandas floating-point round-trips from changing an exact reciprocal boundary such as 135 or 333 into 136 or 334.
+
+A reciprocal is normalized to the nearest integer only when it is within **8 floating-point units in the last place (ULPs)**. The two reference round-trip boundaries are 5 ULPs from 135 and 6 ULPs from 333. A genuine near-integer reciprocal such as `135.00000000001` remains outside this budget and therefore retains the conservative ceiling result of 136.
+
+### v0.31 prospective evidence plan
+
+| Candidate | Main problem / target | Audited cycle | Evidence-only addressable? |
+|---|---|---:|---:|
+| 24h | late 6.95%, revised cells 1.94%, max revenue £23.98 | — | **No** |
+| 48h | late target 99,573,018; revised cells 1.29%, max revenue £11.99 | 201 late-event positions | **No** |
+| 72h | late target >100M search cap; revised target 14,989; max revenue £11.99 | 135 revised-cell positions | **No** |
+| 96h | late target 2,733,153; revised target 2,011; hard gates pass | 206 / 333 | **Yes** |
+
+For the 96-hour candidate:
 
 ```text
-watermark_evidence_plan.csv
-watermark_evidence_plan_contract.json
-watermark_evidence_plan_decision.json
+required finalizable-event trials   = 2,733,153
+late-event audited cycle            = 206 trial positions
+required finalized KPI cells        = 2,011
+revised-cell audited cycle           = 333 trial positions
+median event throughput             ~= 2,055.6 / day
+median KPI-cell throughput           = 9 / day
+late-event-bound evidence depth      = 1,330 days
+revised-cell-bound evidence depth    = 224 days
+combined planning depth              = 1,330 days (~3.64 years)
 ```
+
+The late-event proportion remains the planning bottleneck.
+
+The cycle-stable correction changes the v0.30 single-point targets slightly:
+
+| Component | v0.30 | v0.31 cycle-stable |
+|---|---:|---:|
+| 48h late target | 99,546,369 | **99,573,018** |
+| 72h revised-cell target | 14,299 | **14,989** |
+| 96h late target | 2,718,757 | **2,733,153** |
+| 96h revised-cell target | 1,853 | **2,011** |
+| 96h evidence depth | 1,323d | **1,330d** |
+
+The correction does not change the business conclusion, but it prevents a locally passing point from being described as a stronger threshold than the calculation supports.
+
+**The 1,330-day value is not a promise that waiting 1,330 additional calendar days will certify 96h.** It conditions on future risk rates, throughput and the statistical model remaining at the stated planning values.
 
 See [`docs/CERTIFICATION_EVIDENCE_PLANNING.md`](docs/CERTIFICATION_EVIDENCE_PLANNING.md).
 
 ## v0.29: observed stability is not statistical certification
 
-For each candidate-window row, v0.29 adds one-sided exact Clopper–Pearson upper confidence bounds for:
-
-```text
-late-event proportion
-revised-KPI-cell proportion
-```
+For each candidate-window row, the uncertainty layer adds one-sided exact Clopper–Pearson upper confidence bounds for the late-event and revised-KPI-cell proportions.
 
 The selection family contains 72 simultaneous one-sided bounds. A 95% family-wise Bonferroni correction gives `per_bound_alpha = 0.05 / 72`.
 
@@ -137,9 +152,9 @@ budget_relaxed_after_uncertainty = false
 weighted_score_used = false
 ```
 
-This does **not** establish that 96h is unsafe. It says the current evidence is insufficient for the declared simultaneous certification claim.
+This does not establish that 96h is unsafe. It says the current evidence is insufficient for the declared simultaneous certification claim.
 
-Maximum revenue and paid-subscription revisions remain deterministic hard gates; the project does not fabricate confidence intervals for sparse maxima without a defensible tail model.
+Maximum revenue and paid-subscription revisions remain deterministic hard gates; the project does not create confidence intervals for sparse maxima without a stated tail model.
 
 See [`docs/WATERMARK_UNCERTAINTY.md`](docs/WATERMARK_UNCERTAINTY.md).
 
@@ -187,13 +202,13 @@ validate_uncertainty_certification.py
   -> simultaneous-bound accounting and certification rules
 
 validate_evidence_plan.py
-  -> evidence-depth vs hard-gate classification and planning contract
+  -> cycle-stable evidence-depth vs hard-gate classification
 
 validate_reference_claims.py
   -> pinned seed=2206, days=120 public numerical claims
 ```
 
-A method or data change that moves a published boundary must therefore fail a claim gate until the public evidence is reviewed and updated.
+The evidence-plan generator and validator share the same count-jump-cycle implementation. A method or data change that moves a published boundary must fail a claim gate until the public evidence is reviewed and updated.
 
 ## Quick start
 
