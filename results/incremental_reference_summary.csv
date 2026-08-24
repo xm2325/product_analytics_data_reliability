@@ -16,4 +16,3 @@ targeted_repair_rows_scanned,65004
 targeted_repair_scan_reduction_fraction,0.9390989637155216
 targeted_repair_restored_exact_output_hashes,true
 full_source_integrity_audit_hashes,25
-total_repository_tests,88
