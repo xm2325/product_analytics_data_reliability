@@ -51,8 +51,10 @@ def validate(root: Path) -> None:
     impact = json.loads((root / "pricing_impact_decision.json").read_text(encoding="utf-8"))
     summary = json.loads((root / "reference_summary.json").read_text(encoding="utf-8"))
 
-    if summary.get("version") != "0.33.0":
-        _fail(f"reference summary version is {summary.get('version')}, not 0.33.0")
+    # The impact contract is versioned independently from the top-level workbench release.
+    # Validate its evidence and invariants rather than pinning this validator to v0.33 forever.
+    if not str(summary.get("version", "")).strip():
+        _fail("reference summary version missing")
     if contract.get("no_ltv_extrapolation") is not True or contract.get("no_effect_persistence_beyond_30d_assumed") is not True:
         _fail("long-horizon extrapolation boundary is not explicit")
     if contract.get("synthetic_scale_only") is not True:

@@ -1,41 +1,35 @@
 claim,value,unit,context,interpretation_limit
-rows_raw,276249,rows,v0.33 seed=2206 days=120 synthetic reference,synthetic data only
-rows_rejected,589,rows,v0.33 certification,controlled faults remain inspectable
-rows_certified,275660,rows,v0.33 certification,synthetic data only
-forecast_approved,3,metrics,v0.33 28-point seasonal-naive holdout,planning gate only
-forecast_withheld,6,metrics,v0.33 28-point seasonal-naive holdout,planning gate only
-pricing_experiment_users,8000,users,v0.33 deterministic controlled pricing experiment,synthetic experiment
-pricing_experiment_control,4000,users,v0.33 exact assignment allocation,synthetic experiment
-pricing_experiment_treatment,4000,users,v0.33 exact assignment allocation,synthetic experiment
-pricing_experiment_srm_pvalue,1.0,probability,v0.33 exact two-sided binomial SRM test,assignment-integrity evidence
-pricing_experiment_revenue_effect,0.685080829,GBP_per_user_30d,v0.33 ANCOVA with pre-period revenue and HC3 SE,synthetic experiment
-pricing_experiment_revenue_ci_low,0.551429745,GBP_per_user_30d,v0.33 95% two-sided CI,primary gate requires positive lower bound
-pricing_experiment_revenue_ci_high,0.818731912,GBP_per_user_30d,v0.33 95% two-sided CI,synthetic experiment
-pricing_experiment_paid_effect_pp,-1.625,percentage_points,v0.33 treatment-control paid conversion difference,point estimate remains inside -3pp margin
-pricing_experiment_paid_ci_low_pp,-3.363352023,percentage_points,v0.33 95% two-sided CI,lower bound crosses -3pp harm margin
-pricing_experiment_paid_ci_high_pp,0.113352023,percentage_points,v0.33 95% two-sided CI,synthetic experiment
-pricing_experiment_paid_harm_margin_pp,-3.0,percentage_points,v0.33 pre-specified non-inferiority guardrail,revenue cannot compensate for failure
-pricing_experiment_action,hold,status,v0.33 non-compensatory decision contract,revenue passes but paid guardrail fails
-guardrail_target_per_arm,6393,users_per_arm,v0.33 conditional equal-allocation evidence plan,assumes observed arm rates remain unchanged
-guardrail_additional_per_arm,2393,users_per_arm,v0.33 relative to current 4000 per arm,conditional planning not a power guarantee
-guardrail_evidence_status,additional_evidence_required,status,v0.33 paid-conversion guardrail evidence plan,more data helps only if planning rates persist
-impact_planning_status,counterfactual_only,status,v0.33 HOLD-aware impact contract,not an authorised rollout forecast
-impact_decision_authorised_rollout,false,boolean,v0.33 non-compensatory decision gating,HOLD forbids rollout authorisation
-impact_counterfactual_treated_users,150000,users,v0.33 three synthetic launch cohorts at 25/50/75 percent adoption,hypothetical scale only
-impact_counterfactual_revenue_gbp,102762.124283,GBP,v0.33 fixed-volume 30d cohort impact scaling,counterfactual not realised or authorised
-impact_counterfactual_revenue_ci_low_gbp,82714.461754,GBP,v0.33 experiment CI propagated to fixed treated counts,no LTV persistence assumed
-impact_counterfactual_revenue_ci_high_gbp,122809.786812,GBP,v0.33 experiment CI propagated to fixed treated counts,no LTV persistence assumed
-impact_authorised_treated_users,0,users,v0.33 HOLD-aware rollout gate,zero authorised exposure despite positive counterfactual revenue
-impact_authorised_revenue_gbp,none,GBP,v0.33 HOLD-aware rollout gate,no authorised revenue impact claim while guardrail fails
-point_in_time_selected_watermark,48,hours,v0.33 Apr30 shortest point-estimate feasible candidate,single-snapshot result
-stable_selected_watermark,96,hours,v0.33 observed all-window rule,descriptive stability not statistical certification
-certification_status,no_candidate_certified_familywise_95,status,v0.33 uncertainty selector,insufficient evidence is not proof of unsafe policy
-certified_watermark,none,hours,v0.33 family-wise selector,no candidate certified under stated binomial model
-evidence_plan_selected_watermark,96,hours,v0.33 shortest candidate whose current gap is evidence-depth-only,not a newly certified SLA
-evidence_plan_96h_required_late_trials,2733153,events,v0.33 cycle-stable exact target,conditional on stated rate and model
-evidence_plan_96h_required_revised_cells,2011,cells,v0.33 cycle-stable exact target,conditional on stated rate and model
-evidence_plan_96h_combined_days,1330,days,v0.33 max of component evidence depths,not guaranteed wall-clock time to certification
-evidence_plan_96h_combined_years,3.6413,years,v0.33 conditional evidence-depth estimate,illustrates passive evidence accumulation cost
-global_monotonic_threshold_claimed,false,boolean,v0.33 evidence target contract,cycle stability is not global monotonicity
-unit_tests,68,passed,v0.33 deterministic validation suite,subject to final CI confirmation
-manifest_artifacts,44,count,v0.33 portable reference evidence,SHA-256 integrity manifest
+rows_raw,276249,rows,v0.34 seed=2206 days=120 synthetic reference,synthetic data only
+rows_rejected,589,rows,v0.34 certification,controlled faults remain inspectable
+rows_certified,275660,rows,v0.34 certification,synthetic data only
+forecast_approved,2,metrics,v0.34 four rolling origins x seven-day horizon,planning eligibility only
+forecast_withheld,7,metrics,v0.34 non-compensatory forecast decision gate,withheld is not proof a metric is intrinsically unforecastable
+forecast_approved_metrics,file_transfer:dau;notes_app:dau,metric_set,v0.34 absolute accuracy plus benchmark plus interval gates,reference-only metric set
+file_transfer_dau_wape,0.059108365,WAPE,v0.34 leakage-safe 28-point rolling-origin backtest,synthetic reference
+notes_app_dau_wape,0.039736287,WAPE,v0.34 leakage-safe 28-point rolling-origin backtest,synthetic reference
+photo_editor_dau_wape,0.039212424,WAPE,v0.34 candidate weekly seasonal-naive,absolute accuracy passes
+photo_editor_dau_benchmark_wape,0.025623960,WAPE,v0.34 last-observation benchmark,simpler benchmark is better on this reference
+photo_editor_dau_benchmark_gate,false,boolean,v0.34 non-compensatory benchmark gate,low absolute error alone does not authorise planning use
+pricing_experiment_users,8000,users,v0.34 deterministic controlled pricing experiment,synthetic experiment
+pricing_experiment_revenue_effect,0.685080829,GBP_per_user_30d,v0.34 ANCOVA with pre-period revenue and HC3 SE,synthetic experiment
+pricing_experiment_revenue_ci_low,0.551429745,GBP_per_user_30d,v0.34 95% two-sided CI,primary gate requires positive lower bound
+pricing_experiment_revenue_ci_high,0.818731912,GBP_per_user_30d,v0.34 95% two-sided CI,synthetic experiment
+pricing_experiment_paid_effect_pp,-1.625,percentage_points,v0.34 treatment-control paid conversion difference,point estimate remains inside -3pp margin
+pricing_experiment_paid_ci_low_pp,-3.363352023,percentage_points,v0.34 95% two-sided CI,lower bound crosses -3pp harm margin
+pricing_experiment_action,hold,status,v0.34 non-compensatory experiment decision,revenue passes but paid guardrail fails
+guardrail_target_per_arm,6393,users_per_arm,v0.34 conditional equal-allocation evidence plan,assumes observed arm rates remain unchanged
+guardrail_additional_per_arm,2393,users_per_arm,v0.34 relative to current 4000 per arm,conditional planning not a power guarantee
+impact_planning_status,counterfactual_only,status,v0.34 HOLD-aware impact contract,not an authorised rollout forecast
+impact_counterfactual_revenue_gbp,102762.124283,GBP,v0.34 fixed-volume 30d cohort impact scaling,counterfactual not realised or authorised
+impact_authorised_treated_users,0,users,v0.34 HOLD-aware rollout gate,zero authorised exposure despite positive counterfactual revenue
+point_in_time_selected_watermark,48,hours,v0.34 Apr30 shortest point-estimate feasible candidate,single-snapshot result
+stable_selected_watermark,96,hours,v0.34 observed all-window rule,descriptive stability not statistical certification
+certification_status,no_candidate_certified_familywise_95,status,v0.34 uncertainty selector,insufficient evidence is not proof of unsafe policy
+certified_watermark,none,hours,v0.34 family-wise selector,no candidate certified under stated binomial model
+evidence_plan_selected_watermark,96,hours,v0.34 shortest candidate whose current gap is evidence-depth-only,not a newly certified SLA
+evidence_plan_96h_required_late_trials,2733153,events,v0.34 cycle-stable exact target,conditional on stated rate and model
+evidence_plan_96h_required_revised_cells,2011,cells,v0.34 cycle-stable exact target,conditional on stated rate and model
+evidence_plan_96h_combined_days,1330,days,v0.34 max of component evidence depths,not guaranteed wall-clock time to certification
+global_monotonic_threshold_claimed,false,boolean,v0.34 evidence target contract,cycle stability is not global monotonicity
+unit_tests,75,passed,v0.34 deterministic validation suite,subject to final CI confirmation
+manifest_artifacts,47,count,v0.34 portable reference evidence,SHA-256 integrity manifest
