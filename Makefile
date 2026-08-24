@@ -1,4 +1,4 @@
-.PHONY: install reference validate validate-forecast validate-migration validate-watermark validate-uncertainty validate-evidence validate-experiment validate-impact validate-reference validate-static-claims real-reference real-validate real-static-claims real-check incremental-reference incremental-validate incremental-check test check clean
+.PHONY: install reference validate validate-forecast validate-migration validate-watermark validate-uncertainty validate-evidence validate-experiment validate-impact validate-reference validate-static-claims real-reference real-validate real-static-claims real-check incremental-reference incremental-validate incremental-static-claims incremental-check test check clean
 
 install:
 	python -m pip install -r requirements.txt
@@ -54,7 +54,10 @@ incremental-reference:
 incremental-validate:
 	python scripts/validate_incremental_retail_reference.py build/incremental-retail
 
-incremental-check: incremental-reference incremental-validate
+incremental-static-claims:
+	python scripts/validate_incremental_static_claims.py build/incremental-retail
+
+incremental-check: incremental-reference incremental-validate incremental-static-claims
 
 test:
 	pytest -q
