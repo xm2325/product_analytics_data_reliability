@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.32.0
+
+- added a deterministic 8,000-user pricing experiment with exact 4,000/4,000 treatment allocation and an exact two-sided sample-ratio-mismatch gate at `alpha = 0.001`;
+- added ANCOVA with pre-period revenue adjustment and HC3 robust standard errors for the 30-day revenue primary metric;
+- added a 30-day paid-conversion non-inferiority guardrail with a pre-specified **-3 percentage-point** harm margin and non-compensatory decision semantics;
+- introduced explicit `invalid`, `hold` and `rollout` experiment states so assignment-integrity failures cannot be reinterpreted as ordinary business holds;
+- made the deterministic reference intentionally **HOLD** despite a positive revenue effect: revenue **+£0.6851** with 95% CI **[£0.5514, £0.8187]**, paid conversion **-1.625pp** with 95% CI **[-3.363pp, +0.113pp]**, so the point estimate is inside the harm margin but the lower confidence bound crosses it;
+- generated user-level experiment evidence, estimate, contract and decision artifacts and included them in `reference_summary.json` and the SHA-256 manifest;
+- added an independent pricing-experiment validator that recomputes SRM, ANCOVA + HC3 uncertainty, paid-conversion uncertainty and decision gates from the user-level artifact instead of trusting generated estimates;
+- tightened treatment validation so fractional values such as `0.5` cannot be silently coerced to control via integer casting;
+- extended `make check` and GitHub Actions with the experiment validation layer;
+- advanced the package/reference version to **0.32.0**, the unit-test suite to **63 tests**, and the reference manifest to **40 portable artifacts**.
+
 ## v0.31.0
 
 - replaced single-point prospective exact-bound targets with cycle-stable targets that must remain passing across the next full `ceil(1 / planning_rate)` adverse-count jump cycle;
