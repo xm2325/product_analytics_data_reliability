@@ -5,24 +5,36 @@ on:
     branches: [main, v0.37-incremental-recovery]
     paths:
       - '.github/workflows/incremental-real-data.yml'
+      - 'README.md'
+      - 'CHANGELOG.md'
+      - 'Makefile'
+      - 'docs/INCREMENTAL_RECOVERY_PERFORMANCE.md'
       - 'requirements.txt'
       - 'pyproject.toml'
+      - 'results/incremental_reference_summary.csv'
       - 'src/product_analytics/incremental_retail.py'
       - 'src/product_analytics/real_retail.py'
       - 'src/product_analytics/real_source_contract.py'
       - 'scripts/build_incremental_retail_reference.py'
       - 'scripts/validate_incremental_retail_reference.py'
+      - 'scripts/validate_incremental_static_claims.py'
       - 'tests/test_incremental_retail.py'
   pull_request:
     paths:
       - '.github/workflows/incremental-real-data.yml'
+      - 'README.md'
+      - 'CHANGELOG.md'
+      - 'Makefile'
+      - 'docs/INCREMENTAL_RECOVERY_PERFORMANCE.md'
       - 'requirements.txt'
       - 'pyproject.toml'
+      - 'results/incremental_reference_summary.csv'
       - 'src/product_analytics/incremental_retail.py'
       - 'src/product_analytics/real_retail.py'
       - 'src/product_analytics/real_source_contract.py'
       - 'scripts/build_incremental_retail_reference.py'
       - 'scripts/validate_incremental_retail_reference.py'
+      - 'scripts/validate_incremental_static_claims.py'
       - 'tests/test_incremental_retail.py'
 
 jobs:
@@ -46,6 +58,8 @@ jobs:
         run: python scripts/build_incremental_retail_reference.py --output-dir build/incremental-retail
       - name: Independently validate incremental evidence
         run: python scripts/validate_incremental_retail_reference.py build/incremental-retail
+      - name: Validate checked-in incremental claims
+        run: python scripts/validate_incremental_static_claims.py build/incremental-retail
       - name: Show recovery and performance evidence
         run: |
           cat build/incremental-retail/incremental_summary.json
