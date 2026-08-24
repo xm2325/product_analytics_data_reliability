@@ -1,0 +1,61 @@
+name: real-data
+
+on:
+  push:
+    branches: [main, v0.36-real-data-portability]
+    paths:
+      - '.github/workflows/real-data.yml'
+      - 'requirements.txt'
+      - 'pyproject.toml'
+      - 'src/product_analytics/forecasting.py'
+      - 'src/product_analytics/real_retail.py'
+      - 'scripts/build_real_retail_reference.py'
+      - 'scripts/validate_real_retail_reference.py'
+      - 'tests/test_real_retail.py'
+  pull_request:
+    paths:
+      - '.github/workflows/real-data.yml'
+      - 'requirements.txt'
+      - 'pyproject.toml'
+      - 'src/product_analytics/forecasting.py'
+      - 'src/product_analytics/real_retail.py'
+      - 'scripts/build_real_retail_reference.py'
+      - 'scripts/validate_real_retail_reference.py'
+      - 'tests/test_real_retail.py'
+
+jobs:
+  uci-online-retail-ii:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e .
+      - name: Real-data unit tests
+        run: pytest -q tests/test_real_retail.py
+      - name: Download official UCI source and build evidence
+        run: python scripts/build_real_retail_reference.py --output-dir build/real-retail
+      - name: Independently validate real-data evidence
+        run: python scripts/validate_real_retail_reference.py build/real-retail
+      - name: Show real-data evidence
+        run: |
+          cat build/real-retail/real_source_provenance.json
+          cat build/real-retail/real_quality_report.json
+          cat build/real-retail/real_semantic_comparison.csv
+          cat build/real-retail/real_forecast_evaluations.csv
+          cat build/real-retail/real_data_summary.json
+          cat build/real-retail/real_manifest.json
+      - name: Upload compact validated real-data evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-data-evidence
+          path: build/real-retail/real_*
+          if-no-files-found: error
+          retention-days: 30
