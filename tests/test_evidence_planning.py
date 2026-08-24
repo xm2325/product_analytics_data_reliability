@@ -43,8 +43,8 @@ def test_cycle_stable_target_audits_full_next_count_jump_cycle():
 
 def test_cycle_stable_target_moves_past_local_sawtooth_failure(monkeypatch):
     # Simulate a first passing target at n=100 followed by a count-jump failure
-    # at n=105. The stable planner must move beyond that local reversal rather
-    # than report n=100 as if it were a monotone threshold.
+    # at n=105. The planning rate is deliberately below the risk limit so the
+    # cycle audit, rather than the structural rate gate, controls the result.
     monkeypatch.setattr(
         evidence_planning,
         "required_trials_for_exact_upper",
@@ -53,15 +53,15 @@ def test_cycle_stable_target_moves_past_local_sawtooth_failure(monkeypatch):
     monkeypatch.setattr(
         evidence_planning,
         "exact_binomial_upper",
-        lambda successes, trials, alpha: 0.011 if trials == 105 else 0.009,
+        lambda successes, trials, alpha: 0.051 if trials == 105 else 0.049,
     )
     target, cycle = evidence_planning.cycle_stable_trials_for_exact_upper(
-        0.2,
-        0.01,
+        0.02,
+        0.05,
         0.001,
-        max_trials=200,
+        max_trials=500,
     )
-    assert cycle == 5
+    assert cycle == 50
     assert target == 106
 
 
