@@ -17,6 +17,7 @@ class IncrementalRunStats:
     skipped_partitions: int
     rows_scanned: int
     elapsed_seconds: float
+    source_hashes_computed: int
 
 
 class SimulatedInterruption(RuntimeError):
@@ -29,6 +30,10 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _sql_literal(path: Path) -> str:
+    return "'" + path.as_posix().replace("'", "''") + "'"
 
 
 def _write_json(path: Path, payload: dict[str, object]) -> None:
@@ -53,12 +58,7 @@ def canonical_partition_key(invoice_ts: pd.Series) -> pd.Series:
 
 
 def write_canonical_partitions(canonical: pd.DataFrame, output_dir: Path) -> pd.DataFrame:
-    """Write immutable month partitions once after source adaptation.
-
-    Parquet is written by DuckDB so the project does not need a second parquet
-    dependency. Every canonical row belongs to exactly one partition, including
-    malformed timestamps via the explicit `_invalid_ts` partition.
-    """
+    """Canonicalise an external snapshot into immutable month-partitioned Parquet."""
     output_dir.mkdir(parents=True, exist_ok=True)
     frame = canonical.copy()
     frame["partition_key"] = canonical_partition_key(frame["invoice_ts"])
@@ -70,13 +70,14 @@ def write_canonical_partitions(canonical: pd.DataFrame, output_dir: Path) -> pd.
             target = output_dir / f"{key}.parquet"
             con.register("partition_frame", subset)
             con.execute(
-                "COPY (SELECT * FROM partition_frame ORDER BY source_row_id) "
-                f"TO '{target.as_posix()}' (FORMAT PARQUET, COMPRESSION ZSTD)"
+                "COPY (SELECT * FROM partition_frame ORDER BY source_row_id) TO "
+                f"{_sql_literal(target)} (FORMAT PARQUET, COMPRESSION ZSTD)"
             )
             con.unregister("partition_frame")
             rows.append(
                 {
                     "partition_key": key,
+                    "path": target.name,
                     "rows": int(len(subset)),
                     "bytes": int(target.stat().st_size),
                     "sha256": sha256_file(target),
@@ -90,13 +91,29 @@ def write_canonical_partitions(canonical: pd.DataFrame, output_dir: Path) -> pd.
     return manifest
 
 
+def verify_source_manifest(source_dir: Path, source_manifest: pd.DataFrame) -> None:
+    """Expensive integrity audit: hash every canonical source partition."""
+    expected = set(source_manifest["partition_key"].astype(str))
+    observed = {path.stem for path in source_dir.glob("*.parquet")}
+    if expected != observed:
+        raise AssertionError(f"Source partition set mismatch: expected={expected}, observed={observed}")
+    for row in source_manifest.to_dict("records"):
+        path = source_dir / str(row["path"])
+        if path.stat().st_size != int(row["bytes"]):
+            raise AssertionError(f"Source partition size mismatch: {path.name}")
+        if sha256_file(path) != str(row["sha256"]):
+            raise AssertionError(f"Source partition SHA mismatch: {path.name}")
+
+
 def _aggregate_partition(source_path: Path, output_path: Path) -> int:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect()
     try:
         rows = int(con.execute("SELECT count(*) FROM read_parquet(?)", [str(source_path)]).fetchone()[0])
+        source_sql = _sql_literal(source_path)
+        output_sql = _sql_literal(output_path)
         con.execute(
-            """
+            f"""
             COPY (
                 SELECT
                     CAST(invoice_ts AS DATE) AS date,
@@ -107,13 +124,12 @@ def _aggregate_partition(source_path: Path, output_path: Path) -> int:
                     COUNT(DISTINCT CASE
                         WHEN is_purchase_line AND customer_id IS NOT NULL THEN customer_id
                     END) AS active_customers
-                FROM read_parquet(?)
+                FROM read_parquet({source_sql})
                 WHERE invoice_ts IS NOT NULL
                 GROUP BY 1
                 ORDER BY 1
-            ) TO ? (FORMAT PARQUET, COMPRESSION ZSTD)
-            """,
-            [str(source_path), str(source_path), str(output_path)],
+            ) TO {output_sql} (FORMAT PARQUET, COMPRESSION ZSTD)
+            """
         )
         return rows
     finally:
@@ -122,34 +138,49 @@ def _aggregate_partition(source_path: Path, output_path: Path) -> int:
 
 def run_incremental(
     source_dir: Path,
+    source_manifest: pd.DataFrame,
     metric_dir: Path,
     state_path: Path,
     *,
     stop_after_processed: int | None = None,
+    verify_source_hashes: bool = False,
 ) -> IncrementalRunStats:
-    """Process only missing, changed or invalidated monthly partitions.
+    """Process only missing, source-revised or output-invalidated month partitions.
 
-    A partition is reusable only when both its source SHA and its materialised
-    metric SHA agree with durable state. State is written after each successful
-    partition so an interrupted run can resume without replaying completed work.
+    Normal runs trust the immutable canonical source manifest and only stat the
+    large source Parquet files. `verify_source_hashes=True` is an explicit,
+    expensive integrity audit. Small derived outputs are hashed on every reuse
+    check so stale/corrupt materialisations cannot be silently accepted.
     """
     started = perf_counter()
     state = _load_state(state_path)
     partitions: dict[str, dict[str, object]] = state["partitions"]  # type: ignore[assignment]
-    processed = skipped = rows_scanned = 0
+    processed = skipped = rows_scanned = source_hashes_computed = 0
 
-    source_paths = sorted(source_dir.glob("*.parquet"))
-    if not source_paths:
-        raise ValueError(f"No canonical parquet partitions found in {source_dir}")
+    required_columns = {"partition_key", "path", "rows", "bytes", "sha256"}
+    missing = required_columns - set(source_manifest.columns)
+    if missing:
+        raise ValueError(f"Source manifest missing columns: {sorted(missing)}")
 
-    for source_path in source_paths:
-        key = source_path.stem
+    for row in source_manifest.sort_values("partition_key").to_dict("records"):
+        key = str(row["partition_key"])
+        source_path = source_dir / str(row["path"])
+        if not source_path.exists():
+            raise FileNotFoundError(source_path)
+        if source_path.stat().st_size != int(row["bytes"]):
+            raise RuntimeError(f"Canonical source partition size changed: {source_path.name}")
+        expected_source_sha = str(row["sha256"])
+        if verify_source_hashes:
+            source_hashes_computed += 1
+            if sha256_file(source_path) != expected_source_sha:
+                raise RuntimeError(f"Canonical source partition SHA changed: {source_path.name}")
+
         metric_path = metric_dir / f"{key}.parquet"
-        source_sha = sha256_file(source_path)
         previous = partitions.get(key)
         reusable = bool(
             previous
-            and previous.get("source_sha256") == source_sha
+            and previous.get("source_sha256") == expected_source_sha
+            and previous.get("source_rows") == int(row["rows"])
             and metric_path.exists()
             and previous.get("metric_sha256") == sha256_file(metric_path)
             and previous.get("status") == "complete"
@@ -158,14 +189,16 @@ def run_incremental(
             skipped += 1
             continue
 
-        rows = _aggregate_partition(source_path, metric_path)
-        rows_scanned += rows
+        rows_scanned_now = _aggregate_partition(source_path, metric_path)
+        if rows_scanned_now != int(row["rows"]):
+            raise AssertionError(f"Partition row-count drift for {key}")
+        rows_scanned += rows_scanned_now
         processed += 1
         partitions[key] = {
             "status": "complete",
             "source_path": source_path.name,
-            "source_rows": rows,
-            "source_sha256": source_sha,
+            "source_rows": rows_scanned_now,
+            "source_sha256": expected_source_sha,
             "metric_path": metric_path.name,
             "metric_sha256": sha256_file(metric_path),
         }
@@ -182,6 +215,7 @@ def run_incremental(
         skipped_partitions=skipped,
         rows_scanned=rows_scanned,
         elapsed_seconds=perf_counter() - started,
+        source_hashes_computed=source_hashes_computed,
     )
 
 
