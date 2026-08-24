@@ -7,7 +7,7 @@ A reproducible analytics workbench for a synthetic portfolio of subscription pro
 
 > When a product KPI moves, can the team trust the number, explain the movement, and make a defensible decision using only evidence actually available at the reporting time?
 
-The repository combines event certification, metric contracts, revenue reconciliation, point-in-time retention, forecast gates, processing-time freshness, watermark calibration, rolling SLA backtesting, uncertainty-aware certification, prospective evidence planning and evidence provenance in one auditable workflow.
+The repository combines event certification, metric contracts, revenue reconciliation, point-in-time retention, forecast gates, experiment guardrails, processing-time freshness, watermark calibration, rolling SLA backtesting, uncertainty-aware certification, prospective evidence planning and evidence provenance in one auditable workflow.
 
 All data and results are synthetic, controlled-fault outputs or explicitly labelled planning studies. Nothing here is presented as production-company performance.
 
@@ -35,7 +35,7 @@ These statements are not interchangeable. A policy can look feasible at one snap
 | Candidate-window rows | **36** |
 | Simultaneous one-sided proportion bounds | **72** |
 | Family-wise confidence | **95%** |
-| v0.31 unit tests | **56 passed** |
+| v0.31 unit tests | **57 passed** |
 | Portable artifacts in the reference manifest | **36** |
 
 ## Hard risk budget
@@ -87,7 +87,7 @@ This is a local cycle-stability claim, not a statement that every larger sample 
 
 The cycle length is computed by one shared `count_jump_cycle_trials()` function used by both the evidence generator and the validator. This prevents CSV/pandas floating-point round-trips from changing an exact reciprocal boundary such as 135 or 333 into 136 or 334.
 
-Only reciprocals within a strict `1e-12` numerical tolerance of an integer are treated as that integer. Genuine non-integer reciprocals keep the conservative `ceil(1/rate)` rule. Dedicated regression tests cover both cases.
+A reciprocal is normalized to the nearest integer only when it is within **8 floating-point units in the last place (ULPs)**. The two reference round-trip boundaries are 5 ULPs from 135 and 6 ULPs from 333. A genuine near-integer reciprocal such as `135.00000000001` remains outside this budget and therefore retains the conservative ceiling result of 136.
 
 ### v0.31 prospective evidence plan
 
