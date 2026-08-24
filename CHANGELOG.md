@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.34.0
+
+- replaced the single terminal 28-point forecast holdout with **four rolling as-of origins × seven-day horizons**, preserving 28 evaluation points per product × metric while making the evidence explicitly time-ordered;
+- retained the transparent weekly seasonal-naive candidate and added a simpler **last-observation benchmark**, so low absolute error is no longer sufficient for planning eligibility when a trivial baseline performs better;
+- replaced MAPE-only decisioning with a non-compensatory forecast contract requiring sufficient backtest depth, **MAPE/WAPE ≤ 20%**, candidate WAPE no worse than the benchmark, and at least **85% empirical coverage** for the nominal 90% residual interval;
+- added leakage-safe origin-specific interval calibration using only pre-origin lag-7 residuals and an explicit finite-sample order statistic `ceil((n + 1) * (1 - alpha))`, capped at the calibration sample size;
+- added a hard guard against forecast horizons longer than the seasonal lag, preventing future holdout values from becoming lag sources;
+- generated `forecast_contract.json`, `forecast_backtest.csv` and `forecast_reconciliation.csv`, and upgraded `forecast_evaluations.csv` to carry candidate, benchmark, coverage and individual gate evidence;
+- added historical seven-day plan-vs-actual reconciliation while explicitly refusing to construct a false aggregate 90% interval by summing marginal daily intervals;
+- made the deterministic reference intentionally stricter: **2 metrics approved / 7 withheld**; `file_transfer:dau` and `notes_app:dau` remain eligible, while `photo_editor:dau` is withheld despite **3.92% WAPE** because the last-value benchmark is better at **2.56% WAPE**;
+- added `validate_forecast_plan.py`, which independently reconstructs all **252 row-level rolling-origin forecast points** from lower-level Gold/Silver evidence and recomputes source dates, candidate and benchmark errors, intervals, gate states and reconciliation;
+- refactored the reference build into a two-stage orchestrator so the validated v0.33 experiment/impact/watermark evidence is preserved, then upgraded with v0.34 forecast evidence before the final manifest is re-hashed;
+- removed an inappropriate release-version coupling from `validate_impact_plan.py`: the validator now protects the stable impact contract and evidence invariants rather than requiring the entire workbench to remain v0.33;
+- advanced the package/reference version to **0.34.0**, the deterministic unit-test suite to **75 tests**, and the SHA-256 reference manifest to **47 portable artifacts**;
+- verified the complete remote CI chain on GitHub Actions, including build, forecast, watermark, uncertainty, evidence-plan, experiment, impact, pinned-claim and static-ledger validators, with a validated reference-evidence artifact bundle.
+
 ## v0.33.0
 
 - added a decision-aware impact-planning layer downstream of the v0.32 pricing experiment without changing the reference experiment's **HOLD** action;
