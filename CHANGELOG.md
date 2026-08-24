@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.35.0
+
+- added a **contract-evolution and metric-change governance** layer so a technically green pipeline is no longer treated as evidence that a schema or KPI migration is semantically safe;
+- introduced machine-readable classification of **ADDITIVE**, **BREAKING** and **SEMANTIC** event-contract changes, including producer-compatibility checks rather than trusting version labels;
+- added three deterministic migration proposals: optional `country` is additive and **APPROVE**, required `event_id -> event_uuid` is breaking and **WITHHOLD**, and broadening DAU from `app_open` to any certified event is semantic and **WITHHOLD**;
+- added a **450-row current-vs-candidate shadow replay** across three products × 150 Gold days, with paid-subscription and revenue metrics retained as invariant controls;
+- measured aggregate DAU inflation from the semantic candidate at **+4.94% file_transfer, +2.04% notes_app and +4.04% photo_editor**, exceeding the declared **1% semantic tolerance** while paid/revenue deltas remain zero;
+- recomputed the existing leakage-safe DAU forecast decision under the candidate semantics: `file_transfer` WAPE **5.91% -> 5.53%** remains APPROVE, `notes_app` **3.97% -> 4.06%** remains APPROVE, and `photo_editor` **3.92% -> 3.77%** remains WITHHOLD against its stronger last-value benchmark, so **0/3 forecast eligibility states change**;
+- made migration approval non-compensatory: existing producers must remain compatible, governed metric movement must stay within tolerance, and forecast eligibility must remain unchanged; a pass on one dimension cannot offset a failure on another;
+- generated `contract_registry.json`, `migration_proposals.json`, `migration_replay.csv`, `metric_change_impact.csv`, `migration_forecast_impact.csv` and `migration_decisions.json`, all included in the SHA-256 manifest;
+- added `validate_contract_migration.py`, which independently reloads Gold/Silver evidence, reconstructs all **450 replay rows**, recomputes all **3 current-vs-candidate forecast comparisons**, reclassifies proposals and rebuilds the final migration actions rather than trusting stored decisions;
+- extended the checked-in public claim ledger to cover migration actions, replay depth and semantic drift, so mixing the older 120-day DAU comparison with the new governed 150-day replay fails CI rather than silently changing the evidence boundary;
+- decoupled the forecast validator from the top-level workbench release number and made release-level pinned claims explicitly v0.35, while preserving every v0.34 forecast contract, numerical gate and independent reconstruction invariant;
+- aligned `VERSION`, `pyproject.toml` and runtime `__version__` at **0.35.0**, fixing stale package metadata that had remained at 0.32.0;
+- advanced the deterministic unit-test suite from **75 to 81 tests** and the portable SHA-256 reference manifest from **47 to 53 artifacts**;
+- verified the functional v0.35 chain remotely in GitHub Actions run **#408**: all tests, build, forecast, migration, watermark, uncertainty, evidence-plan, experiment, impact, pinned-claim and public-ledger validators passed and artifact upload completed.
+
 ## v0.34.0
 
 - replaced the single terminal 28-point forecast holdout with **four rolling as-of origins × seven-day horizons**, preserving 28 evaluation points per product × metric while making the evidence explicitly time-ordered;
