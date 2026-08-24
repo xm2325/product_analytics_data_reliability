@@ -5,6 +5,10 @@ on:
     branches: [main, v0.36-real-data-portability]
     paths:
       - '.github/workflows/real-data.yml'
+      - 'README.md'
+      - 'CHANGELOG.md'
+      - 'Makefile'
+      - 'docs/REAL_DATA_PORTABILITY.md'
       - 'requirements.txt'
       - 'pyproject.toml'
       - 'src/product_analytics/forecasting.py'
@@ -18,6 +22,10 @@ on:
   pull_request:
     paths:
       - '.github/workflows/real-data.yml'
+      - 'README.md'
+      - 'CHANGELOG.md'
+      - 'Makefile'
+      - 'docs/REAL_DATA_PORTABILITY.md'
       - 'requirements.txt'
       - 'pyproject.toml'
       - 'src/product_analytics/forecasting.py'
