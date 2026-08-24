@@ -1,94 +1,75 @@
 claim,value,unit,context,interpretation_limit
-rows_raw,276249,rows,v0.29 seed=2206 days=120 synthetic reference,includes explicit app_open activity and processing time
-rows_rejected,589,rows,v0.29 certification,controlled faults remain on commercial event family
-rows_certified,275660,rows,v0.29 certification,synthetic data
-raw_revenue_overstatement_min,9.1278,percent,v0.29 controlled-fault reconciliation,synthetic data
-raw_revenue_overstatement_max,10.9569,percent,v0.29 controlled-fault reconciliation,synthetic data
-conversion_from_first_open,16.1663,percent,v0.29 commercial stream preserved,denominator is first_open
-conversion_from_trial_start,48.5473,percent,v0.29 commercial stream preserved,denominator is trial_start
-dau_forecasts_approved,3,count,v0.29 app_open DAU forecast evaluation,planning gate only
-revenue_subscription_forecasts_withheld,6,count,v0.29 commercial forecast evaluation,planning gate only
-dau_mape_min,3.8916,percent,v0.29 28-point holdout,app_open DAU seasonal-naive baseline
-dau_mape_max,5.9191,percent,v0.29 28-point holdout,app_open DAU seasonal-naive baseline
-revenue_subscription_mape_min,25.5931,percent,v0.29 28-point holdout,commercial stream unchanged
-revenue_subscription_mape_max,37.3253,percent,v0.29 28-point holdout,commercial stream unchanged
-legacy_dau_overstatement_file_transfer,5.2746,percent,v0.29 dual-run mean DAU,legacy any-event relative to app-open DAU
-legacy_dau_overstatement_notes_app,2.2096,percent,v0.29 dual-run mean DAU,legacy any-event relative to app-open DAU
-legacy_dau_overstatement_photo_editor,4.3497,percent,v0.29 dual-run mean DAU,legacy any-event relative to app-open DAU
-file_transfer_d7_mature_users,9450,users,v0.29 analysis_as_of=2026-04-30,573 later-cohort users excluded
-file_transfer_d30_mature_users,7426,users,v0.29 analysis_as_of=2026-04-30,2597 later-cohort users excluded
-notes_app_d7_mature_users,8643,users,v0.29 analysis_as_of=2026-04-30,525 later-cohort users excluded
-notes_app_d30_mature_users,6947,users,v0.29 analysis_as_of=2026-04-30,2221 later-cohort users excluded
-photo_editor_d7_mature_users,10352,users,v0.29 analysis_as_of=2026-04-30,637 later-cohort users excluded
-photo_editor_d30_mature_users,8199,users,v0.29 analysis_as_of=2026-04-30,2790 later-cohort users excluded
-file_transfer_d7_retention,19.5556,percent,v0.29 exact-day mature-only app_open retention,synthetic activity model
-file_transfer_d30_retention,6.3560,percent,v0.29 exact-day mature-only app_open retention,synthetic activity model
-notes_app_d7_retention,38.3547,percent,v0.29 exact-day mature-only app_open retention,synthetic activity model
-notes_app_d30_retention,21.8799,percent,v0.29 exact-day mature-only app_open retention,synthetic activity model
-photo_editor_d7_retention,26.8161,percent,v0.29 exact-day mature-only app_open retention,synthetic activity model
-photo_editor_d30_retention,11.1965,percent,v0.29 exact-day mature-only app_open retention,synthetic activity model
-d7_eligible_fraction_min,94.2033,percent,v0.29 point-in-time maturity denominator,not a retention-rate metric
-d7_eligible_fraction_max,94.2831,percent,v0.29 point-in-time maturity denominator,not a retention-rate metric
-d30_eligible_fraction_min,74.0896,percent,v0.29 point-in-time maturity denominator,not a retention-rate metric
-d30_eligible_fraction_max,75.7744,percent,v0.29 point-in-time maturity denominator,not a retention-rate metric
-processing_snapshot,2026-04-30T23:59:59.999999Z,timestamp,v0.29 point-in-time processing snapshot,not wall-clock current time
-watermark_candidate_hours,24;48;72;96,hours,v0.29 calibration grid,discrete candidates not continuous optimization
-watermark_late_fraction_scope,event_date_on_or_before_candidate_watermark,scope,v0.29 decision denominator,whole settled stream retained only as diagnostic
-watermark_budget_late_event_fraction,0.5,percent,v0.29 hard risk budget,no weighted trade-off
-watermark_budget_revised_metric_cell_fraction,1.0,percent,v0.29 hard risk budget,no weighted trade-off
-watermark_budget_max_revenue_revision,10.0,GBP,v0.29 hard risk budget,no weighted trade-off
-watermark_budget_max_paid_revision,1,subscriptions,v0.29 hard risk budget,no weighted trade-off
-watermark_24h_finalizable_events,251928,events,v0.29 Apr30 point-in-time candidate,event dates after watermark excluded from decision denominator
-watermark_24h_late_fraction,6.9317,percent,v0.29 Apr30 point-in-time candidate,exceeds 0.5% budget
-watermark_24h_late_missing_finalized,62,events,v0.29 Apr30 candidate,events missing for dates already nominally final
-watermark_24h_revised_metric_cell_fraction,1.2138,percent,v0.29 Apr30 candidate,exceeds 1.0% budget
-watermark_24h_feasible,false,boolean,v0.29 Apr30 hard-constraint decision,fails late-event and revised-cell fractions
-watermark_48h_finalizable_events,249634,events,v0.29 Apr30 point-in-time candidate,event dates after watermark excluded
-watermark_48h_late_fraction,0.4951,percent,v0.29 Apr30 point-in-time candidate,inside 0.5% budget
-watermark_48h_late_missing_finalized,24,events,v0.29 Apr30 candidate,requires reconciliation and backfill
-watermark_48h_revised_metric_cell_fraction,0.7533,percent,v0.29 Apr30 candidate,inside 1.0% budget
-watermark_48h_max_revenue_revision,7.99,GBP,v0.29 Apr30 candidate,inside £10 budget
-watermark_48h_max_paid_revision,1,subscriptions,v0.29 Apr30 candidate,at but not above budget
-watermark_48h_feasible,true,boolean,v0.29 Apr30 hard-constraint decision,all four point-estimate constraints pass
-watermark_72h_late_fraction,0.4944,percent,v0.29 Apr30 point-in-time candidate,inside 0.5% budget
-watermark_72h_revised_metric_cell_fraction,0.3799,percent,v0.29 Apr30 candidate,feasible but slower than 48h
-watermark_72h_feasible,true,boolean,v0.29 Apr30 hard-constraint decision,not selected because 48h already feasible
-watermark_96h_late_fraction,0.4814,percent,v0.29 Apr30 point-in-time candidate,inside 0.5% budget
-watermark_96h_revised_metric_cell_fraction,0.0,percent,v0.29 Apr30 candidate,point-estimate feasible
-watermark_96h_feasible,true,boolean,v0.29 Apr30 hard-constraint decision,not selected in single snapshot because shorter candidate passes
-point_in_time_selected_watermark,48,hours,v0.29 Apr30 shortest candidate satisfying point-estimate hard constraints,single-snapshot decision only
-rolling_backtest_windows,9,count,v0.29 weekly snapshots from 2026-03-05 through 2026-04-30,same candidate grid and unchanged risk budget
-rolling_window_selected_sequence,72;72;72;96;48;48;48;48;48,hours,v0.29 per-window shortest point-estimate feasible policy,shows time instability
-rolling_24h_feasible_windows,0,count,v0.29 9-window backtest,never meets all point-estimate constraints
-rolling_48h_feasible_windows,5,count,v0.29 9-window backtest,55.56% observed feasibility rate
-rolling_48h_max_revised_metric_cell_fraction,1.2882,percent,v0.29 9-window backtest,exceeds 1.0% budget in at least one window
-rolling_48h_max_revenue_revision,11.99,GBP,v0.29 9-window backtest,exceeds £10 budget in at least one window
-rolling_72h_feasible_windows,8,count,v0.29 9-window backtest,one window still breaches a hard constraint
-rolling_72h_max_revenue_revision,11.99,GBP,v0.29 9-window backtest,explains at least one hard-budget breach
-rolling_96h_feasible_windows,9,count,v0.29 9-window backtest,only candidate observed feasible in every window
-rolling_96h_max_revised_metric_cell_fraction,0.3003,percent,v0.29 9-window backtest,maximum observed revised-cell fraction
-rolling_96h_max_revenue_revision,0.0,GBP,v0.29 9-window backtest,no revenue revisions behind 96h watermark in tested windows
-stable_selected_watermark,96,hours,v0.29 shortest candidate observed feasible in every rolling window,descriptive observed-stability result not statistical certification
-uncertainty_family_confidence,95.0,percent,v0.29 simultaneous one-sided certification,family-wise confidence level
-uncertainty_correction,bonferroni,method,v0.29 simultaneous one-sided certification,no independence required for Bonferroni family-wise inequality
-uncertainty_candidate_window_rows,36,count,v0.29 4 candidates x 9 rolling windows,all rows used by selector included
-uncertainty_proportion_constraints_per_row,2,count,v0.29 late-event and revised-cell proportions,maxima remain deterministic hard gates
-uncertainty_simultaneous_bounds,72,count,v0.29 36 rows x 2 proportional constraints,full selection family
-uncertainty_per_bound_alpha,0.0006944444444444445,probability,v0.29 0.05 divided by 72,one-sided exact Clopper-Pearson upper bounds
-uncertainty_24h_certified_windows,0,count,v0.29 family-wise 95% certification,no all-window certification
-uncertainty_48h_certified_windows,0,count,v0.29 family-wise 95% certification,observed feasibility does not imply certification
-uncertainty_48h_max_late_upper,0.560124,percent,v0.29 worst simultaneous late-event upper bound,above 0.5% risk budget
-uncertainty_48h_max_revised_upper,3.572210,percent,v0.29 worst simultaneous revised-cell upper bound,above 1.0% budget
-uncertainty_72h_certified_windows,0,count,v0.29 family-wise 95% certification,observed 8/9 feasibility but zero certified windows
-uncertainty_72h_max_late_upper,0.561196,percent,v0.29 worst simultaneous late-event upper bound,above 0.5% risk budget
-uncertainty_72h_max_revised_upper,2.490416,percent,v0.29 worst simultaneous revised-cell upper bound,above 1.0% risk budget
-uncertainty_96h_certified_windows,0,count,v0.29 family-wise 95% certification,observed 9/9 feasibility but zero certified windows
-uncertainty_96h_max_late_upper,0.548510,percent,v0.29 worst simultaneous late-event upper bound,above 0.5% risk budget
-uncertainty_96h_max_revised_upper,1.738521,percent,v0.29 worst simultaneous revised-cell upper bound,above 1.0% risk budget
-certification_status,no_candidate_certified_familywise_95,status,v0.29 simultaneous selection,current evidence insufficient for strict certification under stated binomial model
-certified_watermark,none,hours,v0.29 family-wise 95% selector,do not reinterpret as proof 96h is unsafe
-weighted_score_used,false,boolean,v0.29 all watermark selectors,risk units remain separate
-budget_relaxed_after_backtest,false,boolean,v0.29 observed stability selection,negative results do not trigger post-hoc threshold changes
-budget_relaxed_after_uncertainty,false,boolean,v0.29 uncertainty certification,no post-hoc change to preserve a candidate
-unit_parity_tests,47,passed,v0.29 first GitHub Actions implementation,includes exact-bound and certification accounting tests
-manifest_artifacts,33,count,v0.29 portable reference evidence,SHA-256 integrity manifest
+rows_raw,276249,rows,v0.30 seed=2206 days=120 synthetic reference,synthetic data
+rows_rejected,589,rows,v0.30 certification,controlled faults remain inspectable
+rows_certified,275660,rows,v0.30 certification,synthetic data
+raw_revenue_overstatement_min,9.1278,percent,v0.30 controlled-fault reconciliation,synthetic data
+raw_revenue_overstatement_max,10.9569,percent,v0.30 controlled-fault reconciliation,synthetic data
+conversion_from_first_open,16.1663,percent,v0.30 commercial stream,denominator is first_open
+conversion_from_trial_start,48.5473,percent,v0.30 commercial stream,denominator is trial_start
+dau_forecasts_approved,3,count,v0.30 app_open DAU forecast evaluation,planning gate only
+revenue_subscription_forecasts_withheld,6,count,v0.30 commercial forecast evaluation,planning gate only
+dau_mape_min,3.8916,percent,v0.30 28-point holdout,seasonal-naive baseline
+dau_mape_max,5.9191,percent,v0.30 28-point holdout,seasonal-naive baseline
+revenue_subscription_mape_min,25.5931,percent,v0.30 28-point holdout,commercial stream unchanged
+revenue_subscription_mape_max,37.3253,percent,v0.30 28-point holdout,commercial stream unchanged
+legacy_dau_overstatement_file_transfer,5.2746,percent,v0.30 dual-run mean DAU,deprecated any-event relative to app-open DAU
+legacy_dau_overstatement_notes_app,2.2096,percent,v0.30 dual-run mean DAU,deprecated any-event relative to app-open DAU
+legacy_dau_overstatement_photo_editor,4.3497,percent,v0.30 dual-run mean DAU,deprecated any-event relative to app-open DAU
+file_transfer_d7_mature_users,9450,users,v0.30 analysis_as_of=2026-04-30,573 later-cohort users excluded
+file_transfer_d30_mature_users,7426,users,v0.30 analysis_as_of=2026-04-30,2597 later-cohort users excluded
+notes_app_d7_mature_users,8643,users,v0.30 analysis_as_of=2026-04-30,525 later-cohort users excluded
+notes_app_d30_mature_users,6947,users,v0.30 analysis_as_of=2026-04-30,2221 later-cohort users excluded
+photo_editor_d7_mature_users,10352,users,v0.30 analysis_as_of=2026-04-30,637 later-cohort users excluded
+photo_editor_d30_mature_users,8199,users,v0.30 analysis_as_of=2026-04-30,2790 later-cohort users excluded
+file_transfer_d7_retention,19.5556,percent,v0.30 exact-day mature-only app_open retention,synthetic activity model
+file_transfer_d30_retention,6.3560,percent,v0.30 exact-day mature-only app_open retention,synthetic activity model
+notes_app_d7_retention,38.3547,percent,v0.30 exact-day mature-only app_open retention,synthetic activity model
+notes_app_d30_retention,21.8799,percent,v0.30 exact-day mature-only app_open retention,synthetic activity model
+photo_editor_d7_retention,26.8161,percent,v0.30 exact-day mature-only app_open retention,synthetic activity model
+photo_editor_d30_retention,11.1965,percent,v0.30 exact-day mature-only app_open retention,synthetic activity model
+processing_snapshot,2026-04-30T23:59:59.999999Z,timestamp,v0.30 point-in-time processing snapshot,not wall-clock current time
+watermark_candidate_hours,24;48;72;96,hours,v0.30 calibration grid,discrete candidates
+watermark_budget_late_event_fraction,0.5,percent,v0.30 hard risk budget,no weighted trade-off
+watermark_budget_revised_metric_cell_fraction,1.0,percent,v0.30 hard risk budget,no weighted trade-off
+watermark_budget_max_revenue_revision,10.0,GBP,v0.30 hard risk budget,no weighted trade-off
+watermark_budget_max_paid_revision,1,subscriptions,v0.30 hard risk budget,no weighted trade-off
+point_in_time_selected_watermark,48,hours,v0.30 Apr30 shortest point-estimate feasible candidate,single-snapshot result
+rolling_backtest_windows,9,count,v0.30 weekly snapshots 2026-03-05 through 2026-04-30,same budget and candidate grid
+rolling_window_selected_sequence,72;72;72;96;48;48;48;48;48,hours,v0.30 per-window shortest feasible policy,descriptive sequence
+rolling_24h_feasible_windows,0,count,v0.30 9-window backtest,never point-estimate feasible
+rolling_48h_feasible_windows,5,count,v0.30 9-window backtest,not stable all windows
+rolling_72h_feasible_windows,8,count,v0.30 9-window backtest,one hard-budget breach remains
+rolling_96h_feasible_windows,9,count,v0.30 9-window backtest,only candidate observed feasible every window
+stable_selected_watermark,96,hours,v0.30 observed all-window rule,descriptive stability not statistical certification
+uncertainty_family_confidence,95.0,percent,v0.30 simultaneous one-sided certification,carried unchanged from v0.29
+uncertainty_correction,bonferroni,method,v0.30 simultaneous one-sided certification,selection family includes all 72 bounds
+uncertainty_simultaneous_bounds,72,count,v0.30 4 candidates x 9 windows x 2 proportions,full selection family
+uncertainty_per_bound_alpha,0.0006944444444444445,probability,v0.30 0.05 divided by 72,one-sided exact Clopper-Pearson
+uncertainty_24h_certified_windows,0,count,v0.30 family-wise 95% certification,no all-window certification
+uncertainty_48h_certified_windows,0,count,v0.30 family-wise 95% certification,observed feasibility is not certification
+uncertainty_72h_certified_windows,0,count,v0.30 family-wise 95% certification,observed 8/9 feasibility but no certified windows
+uncertainty_96h_certified_windows,0,count,v0.30 family-wise 95% certification,observed 9/9 feasibility but no certified windows
+uncertainty_96h_max_late_upper,0.548510,percent,v0.30 worst simultaneous late-event upper bound,above 0.5% budget
+uncertainty_96h_max_revised_upper,1.738521,percent,v0.30 worst simultaneous revised-cell upper bound,above 1.0% budget
+certification_status,no_candidate_certified_familywise_95,status,v0.30 uncertainty selector,insufficient evidence is not proof of unsafe policy
+certified_watermark,none,hours,v0.30 family-wise selector,no candidate certified under stated binomial model
+evidence_plan_24h_addressable,false,boolean,v0.30 prospective certification plan,point risks and revenue maximum already fail
+evidence_plan_48h_addressable,false,boolean,v0.30 prospective certification plan,revised-cell rate and revenue maximum already fail
+evidence_plan_48h_required_late_trials,99546369,events,v0.30 component planning calculation,not sufficient to repair independent failures
+evidence_plan_72h_addressable,false,boolean,v0.30 prospective certification plan,revenue hard gate fails and late requirement exceeds 100M cap
+evidence_plan_72h_required_revised_cells,14299,cells,v0.30 revised-cell component only,does not repair other failures
+evidence_plan_72h_revised_bound_days,1589,days,v0.30 median 9 finalized metric cells per day,conditional planning depth
+evidence_plan_96h_addressable,true,boolean,v0.30 prospective certification plan,only candidate with point risks and hard gates passing
+evidence_plan_96h_required_late_trials,2718757,events,v0.30 exact one-sided planning target,conditional on stated rate and model
+evidence_plan_96h_required_revised_cells,1853,cells,v0.30 exact one-sided planning target,conditional on stated rate and model
+evidence_plan_96h_late_bound_days,1323,days,v0.30 median finalizable-event throughput,conditional evidence-depth estimate
+evidence_plan_96h_revised_bound_days,206,days,v0.30 median metric-cell throughput,conditional evidence-depth estimate
+evidence_plan_96h_combined_days,1323,days,v0.30 max of component evidence depths,not guaranteed wall-clock time to certification
+evidence_plan_96h_combined_years,3.6222,years,v0.30 conditional evidence-depth estimate,illustrates passive evidence accumulation cost
+evidence_plan_selected_watermark,96,hours,v0.30 shortest candidate whose current gap is evidence-depth-only,not a newly certified SLA
+weighted_score_used,false,boolean,v0.30 all watermark decision layers,risk units remain separate
+budget_relaxed_after_backtest,false,boolean,v0.30 rolling stability,negative result did not alter thresholds
+budget_relaxed_after_uncertainty,false,boolean,v0.30 statistical certification,negative result did not alter thresholds
+budget_relaxed_for_planning,false,boolean,v0.30 prospective evidence plan,planning does not relax certification contract
+unit_parity_tests,51,passed,v0.30 first full reference build after selector fix,final documentation head reruns CI
+manifest_artifacts,36,count,v0.30 portable reference evidence,SHA-256 integrity manifest
