@@ -8,12 +8,17 @@ from pathlib import Path
 import pandas as pd
 
 
-REFERENCE_VERSION = "0.33.0"
+REFERENCE_VERSION = "0.34.0"
 REFERENCE_RAW_ROWS = 276_249
 REFERENCE_REJECTED_ROWS = 589
 REFERENCE_CERTIFIED_ROWS = 275_660
-REFERENCE_FORECAST_APPROVED = 3
-REFERENCE_FORECAST_WITHHELD = 6
+REFERENCE_FORECAST_APPROVED = 2
+REFERENCE_FORECAST_WITHHELD = 7
+REFERENCE_APPROVED_FORECAST_METRICS = {"file_transfer:dau", "notes_app:dau"}
+REFERENCE_FILE_TRANSFER_DAU_WAPE = 0.059108365336450155
+REFERENCE_NOTES_DAU_WAPE = 0.039736287392922814
+REFERENCE_PHOTO_DAU_WAPE = 0.03921242373821409
+REFERENCE_PHOTO_DAU_BENCHMARK_WAPE = 0.02562396006655574
 REFERENCE_EXPERIMENT_USERS = 8_000
 REFERENCE_REVENUE_EFFECT = 0.685080828553912
 REFERENCE_REVENUE_CI_LOW = 0.5514297450276882
@@ -32,17 +37,23 @@ REFERENCE_STABLE_WATERMARK = 96.0
 REFERENCE_96H_REQUIRED_LATE_EVENTS = 2_733_153
 REFERENCE_96H_REQUIRED_REVISION_CELLS = 2_011
 REFERENCE_96H_EVIDENCE_DAYS = 1_330
-REFERENCE_MANIFEST_ARTIFACTS = 44
+REFERENCE_MANIFEST_ARTIFACTS = 47
 
 
 def _close(actual: object, expected: float, tol: float = 1e-9) -> bool:
     return math.isclose(float(actual), float(expected), rel_tol=0.0, abs_tol=tol)
 
 
+def _as_bool(value: object) -> bool:
+    return str(value).lower() == "true"
+
+
 def validate_reference_claims(root: Path) -> list[str]:
     failures: list[str] = []
     required = [
         "reference_summary.json",
+        "forecast_evaluations.csv",
+        "forecast_contract.json",
         "pricing_experiment_estimates.csv",
         "pricing_experiment_decision.json",
         "pricing_guardrail_evidence_plan.json",
@@ -59,6 +70,8 @@ def validate_reference_claims(root: Path) -> list[str]:
         return ["missing_reference_evidence"]
 
     summary = json.loads((root / "reference_summary.json").read_text(encoding="utf-8"))
+    forecasts = pd.read_csv(root / "forecast_evaluations.csv")
+    forecast_contract = json.loads((root / "forecast_contract.json").read_text(encoding="utf-8"))
     estimates = pd.read_csv(root / "pricing_experiment_estimates.csv")
     experiment_payload = json.loads((root / "pricing_experiment_decision.json").read_text(encoding="utf-8"))
     guardrail = json.loads((root / "pricing_guardrail_evidence_plan.json").read_text(encoding="utf-8"))
@@ -86,6 +99,33 @@ def validate_reference_claims(root: Path) -> list[str]:
         failures.append("reference_forecast_approved")
     if int(forecast_gate.get("withheld", -1)) != REFERENCE_FORECAST_WITHHELD:
         failures.append("reference_forecast_withheld")
+    if set(forecast_gate.get("approved_metrics", [])) != REFERENCE_APPROVED_FORECAST_METRICS:
+        failures.append("reference_forecast_approved_metric_set")
+    if forecast_contract.get("version") != "2.0":
+        failures.append("reference_forecast_contract_version")
+    if forecast_contract.get("weighted_score_used") is not False:
+        failures.append("reference_forecast_weighted_score")
+    if forecast_contract.get("future_data_leakage_allowed") is not False:
+        failures.append("reference_forecast_leakage_flag")
+
+    forecast_by_metric = forecasts.set_index("metric")
+    for metric, expected_wape in {
+        "file_transfer:dau": REFERENCE_FILE_TRANSFER_DAU_WAPE,
+        "notes_app:dau": REFERENCE_NOTES_DAU_WAPE,
+        "photo_editor:dau": REFERENCE_PHOTO_DAU_WAPE,
+    }.items():
+        if metric not in forecast_by_metric.index or not _close(forecast_by_metric.loc[metric, "wape"], expected_wape, tol=1e-12):
+            failures.append(f"reference_{metric.replace(':', '_')}_wape")
+    if "photo_editor:dau" in forecast_by_metric.index:
+        photo = forecast_by_metric.loc["photo_editor:dau"]
+        if not _close(photo["benchmark_wape"], REFERENCE_PHOTO_DAU_BENCHMARK_WAPE, tol=1e-12):
+            failures.append("reference_photo_dau_benchmark_wape")
+        if not _as_bool(photo["absolute_accuracy_gate"]):
+            failures.append("reference_photo_dau_absolute_gate")
+        if _as_bool(photo["benchmark_gate"]):
+            failures.append("reference_photo_dau_benchmark_gate")
+        if _as_bool(photo["approved"]):
+            failures.append("reference_photo_dau_unexpectedly_approved")
 
     experiment_summary = summary.get("pricing_experiment", {})
     integrity = experiment_summary.get("integrity", {})
@@ -177,7 +217,7 @@ def validate_reference_claims(root: Path) -> list[str]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Validate pinned deterministic v0.33 reference claims")
+    parser = argparse.ArgumentParser(description="Validate pinned deterministic v0.34 reference claims")
     parser.add_argument("root", nargs="?", default="build/reference")
     args = parser.parse_args()
     failures = validate_reference_claims(Path(args.root))
