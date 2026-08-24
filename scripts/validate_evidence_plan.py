@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 from pathlib import Path
 
 import pandas as pd
+
+from product_analytics.evidence_planning import count_jump_cycle_trials
 
 
 REQUIRED_ARTIFACTS = {
@@ -98,11 +99,11 @@ def validate_evidence_plan(root: Path) -> list[str]:
 
     for _, row in plan.iterrows():
         if pd.notna(row["required_late_event_trials"]):
-            expected = max(1, math.ceil(1.0 / float(row["planning_late_event_rate"])))
+            expected = count_jump_cycle_trials(float(row["planning_late_event_rate"]))
             if int(row["late_event_audited_cycle_trials"]) != expected:
                 failures.append(f"late_cycle_length_{int(row['allowed_lateness_hours'])}h")
         if pd.notna(row["required_revised_metric_cells"]):
-            expected = max(1, math.ceil(1.0 / float(row["planning_revised_metric_cell_rate"])))
+            expected = count_jump_cycle_trials(float(row["planning_revised_metric_cell_rate"]))
             if int(row["revised_cell_audited_cycle_trials"]) != expected:
                 failures.append(f"revision_cycle_length_{int(row['allowed_lateness_hours'])}h")
 
