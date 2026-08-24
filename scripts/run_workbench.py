@@ -10,6 +10,7 @@ import pandas as pd
 
 from product_analytics.config import PRODUCTS
 from product_analytics.contracts import event_contract
+from product_analytics.evidence_planning import certification_evidence_plan, select_evidence_plan
 from product_analytics.forecasting import evaluate_forecast, mature_metric_history, seasonal_naive
 from product_analytics.freshness import (
     DEFAULT_LATE_ARRIVAL_POLICY,
@@ -47,7 +48,7 @@ from product_analytics.uncertainty import (
 )
 
 
-VERSION = "0.29.0"
+VERSION = "0.30.0"
 
 
 def _write_json(path: Path, payload: object) -> None:
@@ -155,24 +156,11 @@ def main() -> None:
         outputs.append(path)
 
     reporting_date = max(pd.Timestamp(value).date() for value in analysis_as_of_by_product.values())
-    processing_as_of = (
-        pd.Timestamp(reporting_date, tz="UTC")
-        + timedelta(days=1)
-        - timedelta(microseconds=1)
-    )
+    processing_as_of = pd.Timestamp(reporting_date, tz="UTC") + timedelta(days=1) - timedelta(microseconds=1)
 
-    # Row-level 48h audit remains available independently of policy selection.
     arrival_summary = late_arrival_summary(silver, DEFAULT_LATE_ARRIVAL_POLICY)
-    late_finalized_events = late_after_watermark_snapshot(
-        silver,
-        processing_as_of,
-        DEFAULT_LATE_ARRIVAL_POLICY,
-    )
-    revisions = metric_revision_report(
-        silver,
-        processing_as_of,
-        DEFAULT_LATE_ARRIVAL_POLICY,
-    )
+    late_finalized_events = late_after_watermark_snapshot(silver, processing_as_of, DEFAULT_LATE_ARRIVAL_POLICY)
+    revisions = metric_revision_report(silver, processing_as_of, DEFAULT_LATE_ARRIVAL_POLICY)
     revision_overall = revision_summary(revisions)
     for name, frame in {
         "late_arrival_summary.csv": arrival_summary,
@@ -184,7 +172,6 @@ def main() -> None:
         frame.to_csv(path, index=False)
         outputs.append(path)
 
-    # Point-in-time candidate calibration using finalizable-event denominators.
     policy_grid = watermark_policy_grid(
         silver,
         processing_as_of,
@@ -199,8 +186,6 @@ def main() -> None:
     _write_json(policy_decision_path, policy_decision)
     outputs.append(policy_decision_path)
 
-    # Nine weekly snapshots ending at the current reporting snapshot. The same
-    # candidate set and risk budget is used in every window.
     rolling_snapshots = [
         processing_as_of - timedelta(days=7 * weeks_back)
         for weeks_back in range(8, -1, -1)
@@ -225,19 +210,13 @@ def main() -> None:
     _write_json(stable_decision_path, stable_decision)
     outputs.append(stable_decision_path)
 
-    # v0.29 uncertainty-aware certification. All candidate-window proportion
-    # constraints participate in one 95% family-wise Bonferroni family.
-    # Maximum revenue/subscription revisions remain deterministic hard gates.
     uncertainty_grid, uncertainty_contract = watermark_uncertainty_grid(
         rolling_grid,
         budget=DEFAULT_WATERMARK_RISK_BUDGET,
         family_alpha=DEFAULT_FAMILY_ALPHA,
     )
     uncertainty_summary = watermark_uncertainty_summary(uncertainty_grid)
-    certification_decision = select_certified_watermark_policy(
-        uncertainty_summary,
-        uncertainty_contract,
-    )
+    certification_decision = select_certified_watermark_policy(uncertainty_summary, uncertainty_contract)
     for name, frame in {
         "watermark_uncertainty_grid.csv": uncertainty_grid,
         "watermark_uncertainty_summary.csv": uncertainty_summary,
@@ -251,6 +230,24 @@ def main() -> None:
     certification_decision_path = out / "watermark_certification_decision.json"
     _write_json(certification_decision_path, certification_decision)
     outputs.append(certification_decision_path)
+
+    # v0.30: translate the v0.29 no-certification result into a prospective
+    # evidence plan without loosening confidence, risk budgets or hard gates.
+    evidence_plan, evidence_plan_contract = certification_evidence_plan(
+        rolling_grid,
+        family_alpha=DEFAULT_FAMILY_ALPHA,
+        budget=DEFAULT_WATERMARK_RISK_BUDGET,
+    )
+    evidence_plan_decision = select_evidence_plan(evidence_plan)
+    evidence_plan_path = out / "watermark_evidence_plan.csv"
+    evidence_plan.to_csv(evidence_plan_path, index=False)
+    outputs.append(evidence_plan_path)
+    evidence_plan_contract_path = out / "watermark_evidence_plan_contract.json"
+    _write_json(evidence_plan_contract_path, evidence_plan_contract)
+    outputs.append(evidence_plan_contract_path)
+    evidence_plan_decision_path = out / "watermark_evidence_plan_decision.json"
+    _write_json(evidence_plan_decision_path, evidence_plan_decision)
+    outputs.append(evidence_plan_decision_path)
 
     quality = asdict(result["quality_report"])
     quality_path = out / "quality_report.json"
@@ -286,9 +283,7 @@ def main() -> None:
         "quality": quality,
         "portfolio_conversion": portfolio_conversion(silver),
         "forecast_evaluations": forecast_rows,
-        "analysis_as_of": {
-            product: str(cutoff) for product, cutoff in analysis_as_of_by_product.items()
-        },
+        "analysis_as_of": {product: str(cutoff) for product, cutoff in analysis_as_of_by_product.items()},
         "forecast_gate": {
             "approved": int(forecast_frame["approved"].sum()),
             "withheld": int((~forecast_frame["approved"]).sum()),
@@ -310,6 +305,9 @@ def main() -> None:
             "watermark_uncertainty_contract": uncertainty_contract,
             "watermark_uncertainty_summary": uncertainty_summary.to_dict(orient="records"),
             "watermark_certification_decision": certification_decision,
+            "watermark_evidence_plan_contract": evidence_plan_contract,
+            "watermark_evidence_plan": evidence_plan.to_dict(orient="records"),
+            "watermark_evidence_plan_decision": evidence_plan_decision,
         },
         "revenue_reconciliation": reconciliation.to_dict(orient="records"),
     }
