@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.37.0
+
+- converted the v0.36 UCI Online Retail II lane from full-snapshot-only processing into a **recoverable incremental data product** while keeping the same pinned **1,067,371-row** public real source;
+- canonicalised the source once into **25 immutable monthly Parquet partitions** with row counts, byte sizes and SHA-256 provenance; the reference canonical store is **9,806,373 bytes**, about 78.5% smaller than the 45,622,278-byte source workbook;
+- added durable partition state written after every successful materialisation and a reuse rule requiring source-manifest identity, source row count, complete state and the derived-output SHA to agree;
+- made unchanged reruns truly idempotent: the reference no-op processes **0 partitions, scans 0 source rows, computes 0 large-source hashes and changes 0 output hashes**;
+- added an interrupted-run recovery scenario that stops after **7 completed partitions / 257,045 durable rows**, then resumes by skipping those 7 partitions and scanning only the remaining **810,326 rows**; resumed output exactly equals uninterrupted output;
+- added targeted derived-output repair: corrupting the `2010-12` materialisation rebuilds exactly **1 partition / 65,004 source rows**, a **93.91% scan reduction** versus a full-source rebuild, and restores the exact pre-corruption output hashes;
+- added a separate source-revision unit test that changes one canonical month and its manifest, verifies only that month is recomputed, then restores the original month and exact clean-rebuild parity;
+- added `validate_incremental_retail_reference.py`, which independently SHA-verifies every canonical source partition, rebuilds daily metrics directly from source Parquet in DuckDB and checks full/incremental/recovery/repair parity and work accounting;
+- added `results/incremental_reference_summary.csv` and `validate_incremental_static_claims.py` to pin deterministic performance evidence while deliberately **rejecting wall-clock seconds/speedups as stable public claims**;
+- diagnosed the main first-load bottleneck as XLSX decompression/XML parsing and canonical type conversion: one post-optimisation GitHub Actions run observed about **54.99 s** for source parse/normalisation versus **0.100 s** for a clean full DuckDB rebuild from canonical Parquet;
+- found and fixed an implementation-level incremental overhead: the first version opened one DuckDB connection per partition and scanned each changed partition once for `COUNT(*)` and again for aggregation; v0.37 now reuses **one DuckDB connection per run** and performs **one aggregation scan per changed partition**;
+- after that refactor, observed initial incremental materialisation changed from **0.591 s to 0.269 s** across two diagnostic shared-runner executions (~54.5% lower); these timings are retained as diagnostic evidence only, not a performance SLA;
+- retained an explicit expensive full-source integrity audit while making normal no-op processing trust the pinned immutable canonical manifest, so routine idempotent runs do not re-hash every large source partition;
+- added `incremental-real-data` GitHub Actions and `make incremental-check`, separate from both the controlled synthetic and v0.36 real-data portability lanes;
+- preserved the source-time boundary: `InvoiceDate` drives historical monthly replay but is not represented as ingestion time, so no real-data late-arrival, watermark or arrival-order claim is introduced;
+- advanced package/runtime version metadata to **0.37.0** and the full repository suite from **84 to 88 tests** while retaining the v0.35 controlled 53-artifact reference and v0.36 real-data validators.
+
 ## v0.36.0
 
 - added a **real-world external-data portability lane** using the official UCI Online Retail II source rather than extending the synthetic generator;

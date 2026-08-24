@@ -1,0 +1,77 @@
+name: incremental-real-data
+
+on:
+  push:
+    branches: [main, v0.37-incremental-recovery]
+    paths:
+      - '.github/workflows/incremental-real-data.yml'
+      - 'README.md'
+      - 'CHANGELOG.md'
+      - 'Makefile'
+      - 'docs/INCREMENTAL_RECOVERY_PERFORMANCE.md'
+      - 'requirements.txt'
+      - 'pyproject.toml'
+      - 'results/incremental_reference_summary.csv'
+      - 'src/product_analytics/incremental_retail.py'
+      - 'src/product_analytics/real_retail.py'
+      - 'src/product_analytics/real_source_contract.py'
+      - 'scripts/build_incremental_retail_reference.py'
+      - 'scripts/validate_incremental_retail_reference.py'
+      - 'scripts/validate_incremental_static_claims.py'
+      - 'tests/test_incremental_retail.py'
+  pull_request:
+    paths:
+      - '.github/workflows/incremental-real-data.yml'
+      - 'README.md'
+      - 'CHANGELOG.md'
+      - 'Makefile'
+      - 'docs/INCREMENTAL_RECOVERY_PERFORMANCE.md'
+      - 'requirements.txt'
+      - 'pyproject.toml'
+      - 'results/incremental_reference_summary.csv'
+      - 'src/product_analytics/incremental_retail.py'
+      - 'src/product_analytics/real_retail.py'
+      - 'src/product_analytics/real_source_contract.py'
+      - 'scripts/build_incremental_retail_reference.py'
+      - 'scripts/validate_incremental_retail_reference.py'
+      - 'scripts/validate_incremental_static_claims.py'
+      - 'tests/test_incremental_retail.py'
+
+jobs:
+  uci-incremental-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e .
+      - name: Incremental unit tests
+        run: pytest -q tests/test_incremental_retail.py
+      - name: Build real incremental and recovery evidence
+        run: python scripts/build_incremental_retail_reference.py --output-dir build/incremental-retail
+      - name: Independently validate incremental evidence
+        run: python scripts/validate_incremental_retail_reference.py build/incremental-retail
+      - name: Validate checked-in incremental claims
+        run: python scripts/validate_incremental_static_claims.py build/incremental-retail
+      - name: Show recovery and performance evidence
+        run: |
+          cat build/incremental-retail/incremental_summary.json
+          cat build/incremental-retail/incremental_recovery_evidence.json
+          cat build/incremental-retail/incremental_performance.json
+          cat build/incremental-retail/incremental_source_partition_manifest.csv
+      - name: Upload compact v0.37 evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: incremental-real-data-evidence
+          path: |
+            build/incremental-retail/incremental_*.json
+            build/incremental-retail/incremental_*.csv
+          if-no-files-found: error
+          retention-days: 30
