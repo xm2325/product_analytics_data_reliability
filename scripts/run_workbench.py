@@ -33,6 +33,7 @@ from product_analytics.freshness import (
     watermark_stability_summary,
 )
 from product_analytics.generator import generate_events, product_config_frame
+from product_analytics.impact_planning import build_impact_plan
 from product_analytics.metrics import (
     activity_retention,
     dau_definition_migration,
@@ -53,7 +54,7 @@ from product_analytics.uncertainty import (
 )
 
 
-VERSION = "0.32.0"
+VERSION = "0.33.0"
 
 
 def _write_json(path: Path, payload: object) -> None:
@@ -274,6 +275,24 @@ def main() -> None:
     )
     outputs.append(experiment_decision_path)
 
+    impact_scenario, guardrail_evidence, impact_decision, impact_contract = build_impact_plan(
+        experiment_users,
+        experiment_estimates,
+        asdict(experiment_decision),
+    )
+    impact_scenario_path = out / "pricing_impact_scenario.csv"
+    impact_scenario.to_csv(impact_scenario_path, index=False)
+    outputs.append(impact_scenario_path)
+    impact_contract_path = out / "pricing_impact_contract.json"
+    _write_json(impact_contract_path, impact_contract)
+    outputs.append(impact_contract_path)
+    guardrail_evidence_path = out / "pricing_guardrail_evidence_plan.json"
+    _write_json(guardrail_evidence_path, asdict(guardrail_evidence))
+    outputs.append(guardrail_evidence_path)
+    impact_decision_path = out / "pricing_impact_decision.json"
+    _write_json(impact_decision_path, asdict(impact_decision))
+    outputs.append(impact_decision_path)
+
     quality = asdict(result["quality_report"])
     quality_path = out / "quality_report.json"
     _write_json(quality_path, quality)
@@ -318,6 +337,12 @@ def main() -> None:
             "integrity": asdict(experiment_integrity),
             "estimates": experiment_estimates.to_dict(orient="records"),
             "decision": asdict(experiment_decision),
+        },
+        "pricing_impact_planning": {
+            "contract": impact_contract,
+            "guardrail_evidence": asdict(guardrail_evidence),
+            "scenario": impact_scenario.to_dict(orient="records"),
+            "decision": asdict(impact_decision),
         },
         "dau_definition_migration": migration_summary.to_dict(orient="records"),
         "retention_maturity": maturity_summary_json.to_dict(orient="records"),

@@ -32,6 +32,8 @@ jobs:
         run: python scripts/validate_evidence_plan.py build/ci-reference
       - name: Validate pricing experiment
         run: python scripts/validate_pricing_experiment.py build/ci-reference
+      - name: Validate pricing impact plan
+        run: python scripts/validate_impact_plan.py build/ci-reference
       - name: Validate pinned reference claims
         run: python scripts/validate_reference_claims.py build/ci-reference
       - name: Validate checked-in public claim ledger
@@ -42,6 +44,9 @@ jobs:
           cat build/ci-reference/quality_report.json
           cat build/ci-reference/pricing_experiment_decision.json
           cat build/ci-reference/pricing_experiment_contract.json
+          cat build/ci-reference/pricing_guardrail_evidence_plan.json
+          cat build/ci-reference/pricing_impact_decision.json
+          cat build/ci-reference/pricing_impact_contract.json
           cat build/ci-reference/watermark_policy_decision.json
           cat build/ci-reference/watermark_stability_decision.json
           cat build/ci-reference/watermark_certification_decision.json

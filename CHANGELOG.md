@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.33.0
+
+- added a decision-aware impact-planning layer downstream of the v0.32 pricing experiment without changing the reference experiment's **HOLD** action;
+- added three synthetic 30-day launch cohorts with 100,000 eligible users each and hypothetical adoption shares of 25%, 50% and 75%, for **150,000 counterfactual treated users** in total;
+- propagated the experiment's 30-day ANCOVA revenue effect and confidence interval into the fixed-volume scenario, producing **£102,762.12** counterfactual incremental revenue with a 95% interval of **[£82,714.46, £122,809.79]**;
+- explicitly separated counterfactual impact from decision-authorised impact: because the experiment remains HOLD, authorised treated users are **0** and authorised incremental revenue is **null**;
+- added a conditional paid-conversion evidence planner that preserves the experiment's `ddof=1` difference-in-proportions confidence-interval convention rather than silently switching variance definitions;
+- pinned the first equal-allocation arm size whose projected lower confidence bound clears the -3pp guardrail at **6,393 users per arm**, or **2,393 additional users per arm** relative to the current 4,000/arm reference, conditional on the observed arm rates remaining representative;
+- added an explicit structural-failure state when the observed conversion point estimate itself is at or below the harm margin, because more sample alone cannot repair that case under unchanged planning rates;
+- generated `pricing_impact_scenario.csv`, `pricing_impact_contract.json`, `pricing_guardrail_evidence_plan.json` and `pricing_impact_decision.json` and included them in the reference summary and SHA-256 manifest;
+- added `validate_impact_plan.py`, which independently recomputes the paid-conversion CI, audits the 6,393/6,392 integer boundary, verifies the launch ramp and checks `HOLD -> counterfactual_only -> zero authorised exposure`;
+- refocused the checked-in public claim ledger on headline decision evidence and bound it to generated v0.33 evidence with the static-claim validator;
+- advanced the package/reference version to **0.33.0**, the unit-test suite to **68 tests**, and the reference manifest to **44 portable artifacts**.
+
 ## v0.32.0
 
 - added a deterministic 8,000-user pricing experiment with exact 4,000/4,000 treatment allocation and an exact two-sided sample-ratio-mismatch gate at `alpha = 0.001`;

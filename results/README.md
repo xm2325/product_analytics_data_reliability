@@ -1,16 +1,16 @@
 # Reference and planning results
 
-This directory contains the current deterministic reference claim ledger plus preserved historical planning context.
+This directory contains the current deterministic headline claim ledger plus preserved historical planning context.
 
 ## Current deterministic reference
 
-The current reference is **v0.32** with `seed=2206`, `days=120`.
+The current reference is **v0.33** with `seed=2206`, `days=120`.
 
-The authoritative full build is the generated `reference-evidence` GitHub Actions artifact. It contains CSV/JSON evidence, `workbench.duckdb`, and `MANIFEST.json`. The checked-in `reference_summary.csv` is a compact public claim ledger and must remain consistent with the generated reference.
+The authoritative full build is the generated `reference-evidence` GitHub Actions artifact. It contains CSV/JSON evidence, `workbench.duckdb`, and `MANIFEST.json`. The checked-in `reference_summary.csv` is intentionally smaller than the full evidence bundle: it pins the headline claims that define the public decision story and is validated against the generated reference in CI.
 
 ## Product experiment decision
 
-v0.32 adds a fixed-horizon controlled pricing experiment with exactly 4,000 control and 4,000 treatment users.
+The controlled pricing experiment remains exactly 4,000 control and 4,000 treatment users.
 
 ```text
 SRM p-value                   = 1.000
@@ -35,7 +35,61 @@ pricing_experiment_decision.json
 
 `scripts/validate_pricing_experiment.py` independently recomputes SRM, ANCOVA + HC3 revenue uncertainty, paid-conversion uncertainty and the final gate state from the user-level artifact.
 
-See `docs/EXPERIMENT_DECISIONING.md`.
+## v0.33 decision-aware impact planning
+
+v0.33 asks two separate questions after the experiment result:
+
+1. If the current 30-day revenue effect were applied to a fixed synthetic launch ramp, what counterfactual impact would it imply?
+2. Does the experiment decision actually authorise that rollout?
+
+The synthetic launch scenario contains three 100,000-user eligible cohorts with hypothetical adoption shares of 25%, 50% and 75%:
+
+```text
+hypothetical treated users           = 25,000 + 50,000 + 75,000
+                                      = 150,000
+counterfactual incremental revenue   = £102,762.12
+95% interval                         = [£82,714.46, £122,809.79]
+```
+
+Each cohort contributes only its first 30-day revenue outcome. This is **not** a 90-day LTV extrapolation and does not assume the 30-day effect persists beyond its measured horizon.
+
+The experiment is still HOLD, so the decision-aware output remains:
+
+```text
+planning_status                 = counterfactual_only
+decision_authorised_rollout     = false
+authorised_treated_users        = 0
+authorised_incremental_revenue  = null
+```
+
+A positive counterfactual revenue scenario is therefore visible for planning but is not represented as an authorised or realised impact claim.
+
+### Conditional paid-guardrail evidence target
+
+The current paid-conversion lower bound is recomputed with the same `ddof=1` variance convention used by the experiment. Under the explicit planning assumption that observed arm rates remain representative, the first equal-allocation arm size whose projected lower bound is strictly above the -3pp harm margin is:
+
+```text
+current users per arm      = 4,000
+conditional target per arm = 6,393
+additional per arm         = 2,393
+```
+
+The integer boundary is audited directly: 6,393 passes the projected rule and 6,392 does not.
+
+This is a conditional evidence target, not a power guarantee. If future conversion rates move, the required sample size moves too. If the observed point estimate itself falls to or below -3pp, the planner returns a structural point-estimate failure rather than claiming more sample can repair the result.
+
+Generated impact evidence:
+
+```text
+pricing_impact_scenario.csv
+pricing_impact_contract.json
+pricing_guardrail_evidence_plan.json
+pricing_impact_decision.json
+```
+
+`scripts/validate_impact_plan.py` independently recomputes the current paid-conversion CI, the 6,393/6,392 boundary, the launch-ramp volumes, counterfactual revenue scaling and the HOLD-aware authorisation state.
+
+See `docs/IMPACT_PLANNING.md` and `docs/EXPERIMENT_DECISIONING.md`.
 
 ## Freshness evidence ladder
 
@@ -52,7 +106,7 @@ These statements are not interchangeable.
 
 ## Cycle-stable certification evidence plan
 
-The unchanged risk budget and 72-bound family are carried through uncertainty analysis and evidence planning. v0.31 introduced cycle-stable exact evidence targets; v0.32 keeps that contract unchanged.
+The unchanged risk budget and 72-bound family are carried through uncertainty analysis and evidence planning. v0.31 introduced cycle-stable exact evidence targets; v0.33 keeps that contract unchanged.
 
 | Candidate | Planning classification | Key evidence |
 |---|---|---|
@@ -134,7 +188,9 @@ python scripts/validate_watermark_backtest.py build/reference
 python scripts/validate_uncertainty_certification.py build/reference
 python scripts/validate_evidence_plan.py build/reference
 python scripts/validate_pricing_experiment.py build/reference
+python scripts/validate_impact_plan.py build/reference
 python scripts/validate_reference_claims.py build/reference
+python scripts/validate_static_claim_ledger.py build/reference
 ```
 
-See `docs/EXPERIMENT_DECISIONING.md`, `docs/WATERMARK_CALIBRATION.md`, `docs/WATERMARK_STABILITY.md`, `docs/WATERMARK_UNCERTAINTY.md`, `docs/CERTIFICATION_EVIDENCE_PLANNING.md`, `docs/LATE_ARRIVAL_GOVERNANCE.md`, and `docs/REPRODUCIBILITY.md`.
+See `docs/IMPACT_PLANNING.md`, `docs/EXPERIMENT_DECISIONING.md`, `docs/WATERMARK_CALIBRATION.md`, `docs/WATERMARK_STABILITY.md`, `docs/WATERMARK_UNCERTAINTY.md`, `docs/CERTIFICATION_EVIDENCE_PLANNING.md`, `docs/LATE_ARRIVAL_GOVERNANCE.md`, and `docs/REPRODUCIBILITY.md`.

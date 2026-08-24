@@ -1,4 +1,4 @@
-.PHONY: install reference validate validate-watermark validate-uncertainty validate-evidence validate-experiment validate-reference validate-static-claims test check clean
+.PHONY: install reference validate validate-watermark validate-uncertainty validate-evidence validate-experiment validate-impact validate-reference validate-static-claims test check clean
 
 install:
 	python -m pip install -r requirements.txt
@@ -22,6 +22,9 @@ validate-evidence:
 validate-experiment:
 	python scripts/validate_pricing_experiment.py build/reference
 
+validate-impact:
+	python scripts/validate_impact_plan.py build/reference
+
 validate-reference:
 	python scripts/validate_reference_claims.py build/reference
 
@@ -31,7 +34,7 @@ validate-static-claims:
 test:
 	pytest -q
 
-check: test reference validate validate-watermark validate-uncertainty validate-evidence validate-experiment validate-reference validate-static-claims
+check: test reference validate validate-watermark validate-uncertainty validate-evidence validate-experiment validate-impact validate-reference validate-static-claims
 
 clean:
 	rm -rf build .pytest_cache
