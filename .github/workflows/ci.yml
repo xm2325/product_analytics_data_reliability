@@ -20,10 +20,12 @@ jobs:
           pip install -e .
       - name: Unit tests
         run: pytest -q
-      - name: Build reference evidence
-        run: python scripts/run_workbench.py --days 120 --output-dir build/ci-reference
+      - name: Build v0.34 reference evidence
+        run: python scripts/build_reference.py --days 120 --output-dir build/ci-reference
       - name: Validate reference evidence
         run: python scripts/validate_build.py build/ci-reference
+      - name: Validate forecast decision plan
+        run: python scripts/validate_forecast_plan.py build/ci-reference
       - name: Validate watermark backtest
         run: python scripts/validate_watermark_backtest.py build/ci-reference
       - name: Validate uncertainty certification
@@ -41,17 +43,16 @@ jobs:
       - name: Show generated evidence inventory
         run: |
           ls -lh build/ci-reference
+          cat build/ci-reference/forecast_contract.json
+          cat build/ci-reference/forecast_evaluations.csv
           cat build/ci-reference/quality_report.json
           cat build/ci-reference/pricing_experiment_decision.json
-          cat build/ci-reference/pricing_experiment_contract.json
           cat build/ci-reference/pricing_guardrail_evidence_plan.json
           cat build/ci-reference/pricing_impact_decision.json
-          cat build/ci-reference/pricing_impact_contract.json
           cat build/ci-reference/watermark_policy_decision.json
           cat build/ci-reference/watermark_stability_decision.json
           cat build/ci-reference/watermark_certification_decision.json
           cat build/ci-reference/watermark_evidence_plan_decision.json
-          cat build/ci-reference/watermark_evidence_plan_contract.json
           cat build/ci-reference/MANIFEST.json
       - name: Upload validated reference evidence
         uses: actions/upload-artifact@v4
