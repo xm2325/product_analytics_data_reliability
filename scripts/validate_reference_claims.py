@@ -26,7 +26,7 @@ def _as_bool(value: object) -> bool:
 
 
 def validate_reference_claims(root: Path) -> list[str]:
-    """Pin deterministic v0.31 public claims separately from generic invariants."""
+    """Pin deterministic public claims separately from generic invariants."""
     failures: list[str] = []
     required = [
         "watermark_policy_grid.csv",
@@ -43,7 +43,7 @@ def validate_reference_claims(root: Path) -> list[str]:
         "reference_summary.json",
     ]
     if any(not (root / name).is_file() for name in required):
-        return ["missing_v031_reference_evidence"]
+        return ["missing_reference_evidence"]
 
     grid = pd.read_csv(root / "watermark_policy_grid.csv").sort_values("allowed_lateness_hours").reset_index(drop=True)
     decision = json.loads((root / "watermark_policy_decision.json").read_text(encoding="utf-8"))
@@ -165,8 +165,6 @@ def validate_reference_claims(root: Path) -> list[str]:
     if certification_decision.get("budget_relaxed_after_uncertainty") is not False:
         failures.append("reference_uncertainty_budget_relaxed")
 
-    # v0.31: distinguish structural/hard-gate failures from evidence-depth gaps
-    # and pin the cycle-stable reference targets rather than single-point crossings.
     plan_rows = {
         float(row["allowed_lateness_hours"]): row for _, row in evidence_plan.iterrows()
     }
@@ -231,7 +229,7 @@ def validate_reference_claims(root: Path) -> list[str]:
     if evidence_decision.get("budget_relaxed_for_planning") is not False:
         failures.append("reference_evidence_decision_budget_relaxed")
 
-    if summary.get("version") != "0.31.0":
+    if summary.get("version") != "0.32.0":
         failures.append("reference_summary_version")
     processing = summary.get("processing_time", {})
     point_in_time = processing.get("point_in_time_watermark_calibration", {})
@@ -255,7 +253,7 @@ def validate_reference_claims(root: Path) -> list[str]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Validate pinned v0.31 deterministic reference claims")
+    parser = argparse.ArgumentParser(description="Validate pinned deterministic reference claims")
     parser.add_argument("root", nargs="?", default="build/reference")
     args = parser.parse_args()
     failures = validate_reference_claims(Path(args.root))

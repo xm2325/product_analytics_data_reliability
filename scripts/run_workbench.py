@@ -11,6 +11,11 @@ import pandas as pd
 from product_analytics.config import PRODUCTS
 from product_analytics.contracts import event_contract
 from product_analytics.evidence_planning import certification_evidence_plan, select_evidence_plan
+from product_analytics.experiments import (
+    evaluate_pricing_experiment,
+    generate_pricing_experiment,
+    pricing_experiment_contract,
+)
 from product_analytics.forecasting import evaluate_forecast, mature_metric_history, seasonal_naive
 from product_analytics.freshness import (
     DEFAULT_LATE_ARRIVAL_POLICY,
@@ -48,7 +53,7 @@ from product_analytics.uncertainty import (
 )
 
 
-VERSION = "0.31.0"
+VERSION = "0.32.0"
 
 
 def _write_json(path: Path, payload: object) -> None:
@@ -231,8 +236,6 @@ def main() -> None:
     _write_json(certification_decision_path, certification_decision)
     outputs.append(certification_decision_path)
 
-    # v0.31: translate the v0.29 no-certification result into a prospective
-    # cycle-stable evidence plan without loosening confidence, risk budgets or hard gates.
     evidence_plan, evidence_plan_contract = certification_evidence_plan(
         rolling_grid,
         family_alpha=DEFAULT_FAMILY_ALPHA,
@@ -248,6 +251,28 @@ def main() -> None:
     evidence_plan_decision_path = out / "watermark_evidence_plan_decision.json"
     _write_json(evidence_plan_decision_path, evidence_plan_decision)
     outputs.append(evidence_plan_decision_path)
+
+    experiment_users = generate_pricing_experiment(seed=args.seed, n_per_arm=4000)
+    experiment_estimates, experiment_integrity, experiment_decision = evaluate_pricing_experiment(experiment_users)
+    experiment_contract = pricing_experiment_contract()
+    experiment_users_path = out / "pricing_experiment_users.csv"
+    experiment_users.to_csv(experiment_users_path, index=False)
+    outputs.append(experiment_users_path)
+    experiment_estimates_path = out / "pricing_experiment_estimates.csv"
+    experiment_estimates.to_csv(experiment_estimates_path, index=False)
+    outputs.append(experiment_estimates_path)
+    experiment_contract_path = out / "pricing_experiment_contract.json"
+    _write_json(experiment_contract_path, experiment_contract)
+    outputs.append(experiment_contract_path)
+    experiment_decision_path = out / "pricing_experiment_decision.json"
+    _write_json(
+        experiment_decision_path,
+        {
+            "integrity": asdict(experiment_integrity),
+            "decision": asdict(experiment_decision),
+        },
+    )
+    outputs.append(experiment_decision_path)
 
     quality = asdict(result["quality_report"])
     quality_path = out / "quality_report.json"
@@ -287,6 +312,12 @@ def main() -> None:
         "forecast_gate": {
             "approved": int(forecast_frame["approved"].sum()),
             "withheld": int((~forecast_frame["approved"]).sum()),
+        },
+        "pricing_experiment": {
+            "contract": experiment_contract,
+            "integrity": asdict(experiment_integrity),
+            "estimates": experiment_estimates.to_dict(orient="records"),
+            "decision": asdict(experiment_decision),
         },
         "dau_definition_migration": migration_summary.to_dict(orient="records"),
         "retention_maturity": maturity_summary_json.to_dict(orient="records"),
