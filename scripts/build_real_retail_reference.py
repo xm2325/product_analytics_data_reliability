@@ -18,6 +18,10 @@ from product_analytics.real_retail import (
     source_provenance,
     write_json,
 )
+from product_analytics.real_source_contract import (
+    assert_official_source_archive,
+    assert_official_workbook,
+)
 
 
 def _sha256(path: Path) -> str:
@@ -44,8 +48,10 @@ def main() -> None:
         download_source(archive_path)
     if not archive_path.exists():
         raise FileNotFoundError(archive_path)
+    assert_official_source_archive(archive_path)
 
     workbook_path = extract_workbook(archive_path, source_dir / "extracted")
+    assert_official_workbook(workbook_path)
     canonical, sheets = load_workbook(workbook_path)
 
     quality = quality_report(canonical, sheets)
