@@ -30,12 +30,16 @@ jobs:
         run: python scripts/validate_uncertainty_certification.py build/ci-reference
       - name: Validate certification evidence plan
         run: python scripts/validate_evidence_plan.py build/ci-reference
+      - name: Validate pricing experiment
+        run: python scripts/validate_pricing_experiment.py build/ci-reference
       - name: Validate pinned reference claims
         run: python scripts/validate_reference_claims.py build/ci-reference
       - name: Show generated evidence inventory
         run: |
           ls -lh build/ci-reference
           cat build/ci-reference/quality_report.json
+          cat build/ci-reference/pricing_experiment_decision.json
+          cat build/ci-reference/pricing_experiment_contract.json
           cat build/ci-reference/watermark_policy_decision.json
           cat build/ci-reference/watermark_stability_decision.json
           cat build/ci-reference/watermark_certification_decision.json
