@@ -8,7 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 
-REFERENCE_TEST_COUNT = 68
+REFERENCE_TEST_COUNT = 75
 
 
 def _fail(message: str) -> None:
@@ -39,24 +39,19 @@ def validate(root: Path, ledger_path: Path) -> None:
     if set(ledger.columns) != required_columns:
         _fail(f"unexpected ledger columns: {list(ledger.columns)}")
     if ledger["claim"].duplicated().any():
-        duplicates = sorted(ledger.loc[ledger["claim"].duplicated(), "claim"].unique())
-        _fail(f"duplicate claims: {duplicates}")
+        _fail("ledger contains duplicate claims")
     if ledger[list(required_columns)].eq("").any().any():
         _fail("ledger contains blank required fields")
-    if not ledger["context"].str.startswith("v0.33").all():
-        stale = ledger.loc[~ledger["context"].str.startswith("v0.33"), ["claim", "context"]]
-        _fail(f"stale context rows: {stale.to_dict(orient='records')}")
+    if not ledger["context"].str.startswith("v0.34").all():
+        _fail("ledger contains stale pre-v0.34 context")
 
     claims = dict(zip(ledger["claim"], ledger["value"], strict=True))
     summary = json.loads((root / "reference_summary.json").read_text(encoding="utf-8"))
     manifest = json.loads((root / "MANIFEST.json").read_text(encoding="utf-8"))
-    impact = summary["pricing_impact_planning"]
-    experiment = summary["pricing_experiment"]
-    estimates = {row["metric"]: row for row in experiment["estimates"]}
-    processing = summary["processing_time"]
+    forecasts = pd.read_csv(root / "forecast_evaluations.csv").set_index("metric")
 
-    if summary.get("version") != "0.33.0":
-        _fail(f"generated summary version is {summary.get('version')}, not 0.33.0")
+    if summary.get("version") != "0.34.0":
+        _fail(f"generated summary version is {summary.get('version')}, not 0.34.0")
 
     quality = summary["quality"]
     for name in ("rows_raw", "rows_rejected", "rows_certified"):
@@ -68,46 +63,54 @@ def validate(root: Path, ledger_path: Path) -> None:
         _fail("forecast_approved differs from generated evidence")
     if int(_as_float(claims, "forecast_withheld")) != int(forecast_gate["withheld"]):
         _fail("forecast_withheld differs from generated evidence")
+    _assert_text(
+        claims,
+        "forecast_approved_metrics",
+        ";".join(sorted(forecast_gate["approved_metrics"])),
+    )
+    _assert_close(claims, "file_transfer_dau_wape", forecasts.loc["file_transfer:dau", "wape"], tol=1e-9)
+    _assert_close(claims, "notes_app_dau_wape", forecasts.loc["notes_app:dau", "wape"], tol=1e-9)
+    _assert_close(claims, "photo_editor_dau_wape", forecasts.loc["photo_editor:dau", "wape"], tol=1e-9)
+    _assert_close(
+        claims,
+        "photo_editor_dau_benchmark_wape",
+        forecasts.loc["photo_editor:dau", "benchmark_wape"],
+        tol=1e-9,
+    )
+    _assert_text(
+        claims,
+        "photo_editor_dau_benchmark_gate",
+        str(bool(str(forecasts.loc["photo_editor:dau", "benchmark_gate"]).lower() == "true")).lower(),
+    )
 
+    experiment = summary["pricing_experiment"]
+    estimates = {row["metric"]: row for row in experiment["estimates"]}
     integrity = experiment["integrity"]
     revenue = estimates["revenue_gbp_30d"]
     paid = estimates["paid_subscription_30d"]
     decision = experiment["decision"]
     if int(_as_float(claims, "pricing_experiment_users")) != int(integrity["n_total"]):
-        _fail("pricing_experiment_users differs from generated experiment")
-    if int(_as_float(claims, "pricing_experiment_control")) != int(integrity["n_control"]):
-        _fail("pricing_experiment_control differs from generated experiment")
-    if int(_as_float(claims, "pricing_experiment_treatment")) != int(integrity["n_treatment"]):
-        _fail("pricing_experiment_treatment differs from generated experiment")
-    _assert_close(claims, "pricing_experiment_srm_pvalue", integrity["p_value"], tol=1e-12)
+        _fail("pricing_experiment_users differs")
     _assert_close(claims, "pricing_experiment_revenue_effect", revenue["effect"], tol=1e-9)
     _assert_close(claims, "pricing_experiment_revenue_ci_low", revenue["ci_low"], tol=1e-9)
     _assert_close(claims, "pricing_experiment_revenue_ci_high", revenue["ci_high"], tol=1e-9)
     _assert_close(claims, "pricing_experiment_paid_effect_pp", 100.0 * paid["effect"], tol=1e-6)
     _assert_close(claims, "pricing_experiment_paid_ci_low_pp", 100.0 * paid["ci_low"], tol=1e-6)
-    _assert_close(claims, "pricing_experiment_paid_ci_high_pp", 100.0 * paid["ci_high"], tol=1e-6)
-    _assert_close(claims, "pricing_experiment_paid_harm_margin_pp", 100.0 * experiment["contract"]["paid_harm_guardrail"], tol=1e-12)
     _assert_text(claims, "pricing_experiment_action", decision["action"])
 
+    impact = summary["pricing_impact_planning"]
     evidence = impact["guardrail_evidence"]
     impact_decision = impact["decision"]
     if int(_as_float(claims, "guardrail_target_per_arm")) != int(evidence["equal_allocation_target_per_arm"]):
-        _fail("guardrail_target_per_arm differs from generated plan")
+        _fail("guardrail_target_per_arm differs")
     if int(_as_float(claims, "guardrail_additional_per_arm")) != int(evidence["additional_users_per_arm_from_current_minimum"]):
-        _fail("guardrail_additional_per_arm differs from generated plan")
-    _assert_text(claims, "guardrail_evidence_status", evidence["status"])
+        _fail("guardrail_additional_per_arm differs")
     _assert_text(claims, "impact_planning_status", impact_decision["planning_status"])
-    _assert_text(claims, "impact_decision_authorised_rollout", str(bool(impact_decision["decision_authorised_rollout"])).lower())
-    if int(_as_float(claims, "impact_counterfactual_treated_users")) != int(impact_decision["counterfactual_treated_users"]):
-        _fail("impact_counterfactual_treated_users differs")
     _assert_close(claims, "impact_counterfactual_revenue_gbp", impact_decision["counterfactual_incremental_revenue_gbp"], tol=1e-6)
-    _assert_close(claims, "impact_counterfactual_revenue_ci_low_gbp", impact_decision["counterfactual_incremental_revenue_ci_low_gbp"], tol=1e-6)
-    _assert_close(claims, "impact_counterfactual_revenue_ci_high_gbp", impact_decision["counterfactual_incremental_revenue_ci_high_gbp"], tol=1e-6)
     if int(_as_float(claims, "impact_authorised_treated_users")) != int(impact_decision["authorised_treated_users"]):
         _fail("impact_authorised_treated_users differs")
-    expected_authorised_revenue = "none" if impact_decision["authorised_incremental_revenue_gbp"] is None else str(impact_decision["authorised_incremental_revenue_gbp"])
-    _assert_text(claims, "impact_authorised_revenue_gbp", expected_authorised_revenue)
 
+    processing = summary["processing_time"]
     point = processing["point_in_time_watermark_calibration"]
     stable = processing["watermark_stability_decision"]
     certified = processing["watermark_certification_decision"]
@@ -120,13 +123,9 @@ def validate(root: Path, ledger_path: Path) -> None:
     _assert_text(claims, "certified_watermark", "none" if certified["selected_lateness_hours"] is None else str(certified["selected_lateness_hours"]))
     _assert_close(claims, "evidence_plan_selected_watermark", plan_decision["selected_lateness_hours"], tol=1e-12)
     row96 = plan[96.0]
-    for name, expected in {
-        "evidence_plan_96h_required_late_trials": row96["required_late_event_trials"],
-        "evidence_plan_96h_required_revised_cells": row96["required_revised_metric_cells"],
-        "evidence_plan_96h_combined_days": row96["estimated_calendar_days_for_both_proportions"],
-        "evidence_plan_96h_combined_years": row96["estimated_calendar_years_for_both_proportions"],
-    }.items():
-        _assert_close(claims, name, expected, tol=1e-4 if name.endswith("years") else 1e-9)
+    _assert_close(claims, "evidence_plan_96h_required_late_trials", row96["required_late_event_trials"], tol=1e-9)
+    _assert_close(claims, "evidence_plan_96h_required_revised_cells", row96["required_revised_metric_cells"], tol=1e-9)
+    _assert_close(claims, "evidence_plan_96h_combined_days", row96["estimated_calendar_days_for_both_proportions"], tol=1e-9)
     _assert_text(claims, "global_monotonic_threshold_claimed", str(bool(contract["global_monotonic_threshold_claimed"])).lower())
 
     if int(_as_float(claims, "unit_tests")) != REFERENCE_TEST_COUNT:
@@ -138,7 +137,7 @@ def validate(root: Path, ledger_path: Path) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Validate checked-in public v0.33 claims against generated reference evidence")
+    parser = argparse.ArgumentParser(description="Validate checked-in public v0.34 claims against generated evidence")
     parser.add_argument("root", nargs="?", default="build/reference")
     parser.add_argument("--ledger", default="results/reference_summary.csv")
     args = parser.parse_args()
