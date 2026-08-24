@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from math import floor, sqrt
 from typing import Mapping, Sequence
 
@@ -54,7 +54,7 @@ def impact_planning_contract() -> dict[str, object]:
         "hypothetical_adoption_shares": list(DEFAULT_ADOPTION_SHARES),
         "revenue_effect_source": "pricing experiment ANCOVA treatment effect and its 95% confidence interval",
         "uncertainty_propagation": "fixed planned treated-user counts multiplied by the experiment effect confidence interval",
-        "guardrail_evidence_rule": "minimum equal-allocation per-arm sample size whose normal-approximation lower confidence bound clears the pre-specified non-inferiority margin, conditioning on observed arm rates",
+        "guardrail_evidence_rule": "minimum equal-allocation per-arm sample size whose projected difference-in-proportions lower confidence bound clears the pre-specified non-inferiority margin, conditioning on observed arm rates and retaining the experiment's ddof=1 variance convention",
         "guardrail_harm_margin": DEFAULT_PAID_HARM_GUARDRAIL,
         "confidence_level": DEFAULT_CONFIDENCE_LEVEL,
         "hold_policy": "HOLD or INVALID experiments may have counterfactual impact scenarios but no decision-authorised rollout impact",
@@ -73,6 +73,21 @@ def _binary_series(frame: pd.DataFrame, column: str) -> pd.Series:
     return values.astype(int)
 
 
+def _projected_equal_arm_lower_bound(
+    p_control: float,
+    p_treatment: float,
+    n_per_arm: int,
+    z: float,
+) -> float:
+    if n_per_arm < 2:
+        raise ValueError("n_per_arm must be at least 2")
+    # The experiment's difference_in_means uses sample variance with ddof=1.
+    # For a Bernoulli arm with fixed planning rate p and arm size n,
+    # sample_variance / n = p(1-p)/(n-1).
+    variance_sum = p_control * (1.0 - p_control) + p_treatment * (1.0 - p_treatment)
+    return (p_treatment - p_control) - z * sqrt(variance_sum / (n_per_arm - 1))
+
+
 def guardrail_evidence_plan(
     frame: pd.DataFrame,
     *,
@@ -83,9 +98,9 @@ def guardrail_evidence_plan(
 ) -> GuardrailEvidencePlan:
     """Plan equal-allocation evidence needed to clear a non-inferiority guardrail.
 
-    This is deliberately conditional planning, not a power guarantee: observed arm
-    rates are treated as fixed planning rates and the same normal confidence-bound
-    definition used by the experiment guardrail is projected to larger equal arms.
+    This is conditional evidence planning, not a power guarantee: observed arm rates
+    are treated as fixed planning rates and the same ddof=1 normal confidence-bound
+    convention used by the experiment guardrail is projected to larger equal arms.
     """
     if not 0 < confidence_level < 1:
         raise ValueError("confidence_level must be between 0 and 1")
@@ -100,10 +115,7 @@ def guardrail_evidence_plan(
     p_treatment = float(treated.mean())
     difference = p_treatment - p_control
     z = float(norm.ppf(0.5 + confidence_level / 2.0))
-    current_se = sqrt(
-        p_control * (1.0 - p_control) / len(control)
-        + p_treatment * (1.0 - p_treatment) / len(treated)
-    )
+    current_se = sqrt(float(control.var(ddof=1) / len(control) + treated.var(ddof=1) / len(treated)))
     current_ci_low = difference - z * current_se
     current_passes = current_ci_low > harm_margin
 
@@ -116,17 +128,14 @@ def guardrail_evidence_plan(
             "more sample alone cannot clear the guardrail if the planning rates stay unchanged"
         )
     else:
-        variance_sum = (
-            p_control * (1.0 - p_control)
-            + p_treatment * (1.0 - p_treatment)
-        )
+        variance_sum = p_control * (1.0 - p_control) + p_treatment * (1.0 - p_treatment)
         slack = difference - harm_margin
-        threshold = (z * z * variance_sum) / (slack * slack)
-        target = max(2, floor(threshold) + 1)
-        # Strictly audit the integer boundary against the same lower-CI rule.
-        while difference - z * sqrt(variance_sum / target) <= harm_margin:
+        threshold_n_minus_one = (z * z * variance_sum) / (slack * slack)
+        target = max(2, floor(threshold_n_minus_one) + 2)
+        # Strictly audit both sides of the integer boundary against the projected rule.
+        while _projected_equal_arm_lower_bound(p_control, p_treatment, target, z) <= harm_margin:
             target += 1
-        while target > 2 and difference - z * sqrt(variance_sum / (target - 1)) > harm_margin:
+        while target > 2 and _projected_equal_arm_lower_bound(p_control, p_treatment, target - 1, z) > harm_margin:
             target -= 1
         additional = max(0, target - min(len(control), len(treated)))
         status = "already_clears_under_observed_rates" if current_passes else "additional_evidence_required"
