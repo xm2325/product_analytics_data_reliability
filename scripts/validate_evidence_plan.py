@@ -42,6 +42,9 @@ def validate_evidence_plan(root: Path) -> list[str]:
         "paid_hard_gate_passes",
         "required_late_event_trials",
         "required_revised_metric_cells",
+        "late_trial_requirement_exceeds_search_cap",
+        "revision_trial_requirement_exceeds_search_cap",
+        "evidence_requirement_quantified",
         "median_finalizable_events_per_day",
         "median_metric_cells_per_day",
         "estimated_calendar_days_for_both_proportions",
@@ -52,15 +55,25 @@ def validate_evidence_plan(root: Path) -> list[str]:
         failures.append("evidence_plan_columns")
         return failures
 
+    late_below = _as_bool(plan["late_rate_below_budget"])
+    revised_below = _as_bool(plan["revised_rate_below_budget"])
+    revenue_pass = _as_bool(plan["revenue_hard_gate_passes"])
+    paid_pass = _as_bool(plan["paid_hard_gate_passes"])
+    quantified = _as_bool(plan["evidence_requirement_quantified"])
+    late_cap = _as_bool(plan["late_trial_requirement_exceeds_search_cap"])
+    revision_cap = _as_bool(plan["revision_trial_requirement_exceeds_search_cap"])
     evidence_only = _as_bool(plan["evidence_only_addressable"])
-    component = (
-        _as_bool(plan["late_rate_below_budget"])
-        & _as_bool(plan["revised_rate_below_budget"])
-        & _as_bool(plan["revenue_hard_gate_passes"])
-        & _as_bool(plan["paid_hard_gate_passes"])
-    )
+
+    component = late_below & revised_below & revenue_pass & paid_pass & quantified
     if not evidence_only.eq(component).all():
         failures.append("evidence_only_component_accounting")
+
+    if (late_cap & plan["required_late_event_trials"].notna()).any():
+        failures.append("late_search_cap_with_numeric_requirement")
+    if (revision_cap & plan["required_revised_metric_cells"].notna()).any():
+        failures.append("revision_search_cap_with_numeric_requirement")
+    if (quantified & (late_cap | revision_cap)).any():
+        failures.append("quantified_despite_search_cap")
 
     if (plan["median_finalizable_events_per_day"] <= 0).any():
         failures.append("nonpositive_event_throughput")
@@ -76,10 +89,10 @@ def validate_evidence_plan(root: Path) -> list[str]:
         if eligible["estimated_calendar_days_for_both_proportions"].isna().any():
             failures.append("eligible_missing_calendar_days")
 
-    rate_fail = ~_as_bool(plan["late_rate_below_budget"])
+    rate_fail = ~late_below
     if plan.loc[rate_fail, "required_late_event_trials"].notna().any():
         failures.append("rate_breach_given_late_sample_plan")
-    revision_rate_fail = ~_as_bool(plan["revised_rate_below_budget"])
+    revision_rate_fail = ~revised_below
     if plan.loc[revision_rate_fail, "required_revised_metric_cells"].notna().any():
         failures.append("rate_breach_given_revision_sample_plan")
 
