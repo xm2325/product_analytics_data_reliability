@@ -4,12 +4,12 @@
 
 - replaced single-point prospective exact-bound targets with cycle-stable targets that must remain passing across the next full `ceil(1 / planning_rate)` adverse-count jump cycle;
 - made the statistical claim boundary explicit with `global_monotonic_threshold_claimed = false` rather than implying that all larger sample sizes necessarily pass;
-- introduced one shared count-jump-cycle function for the generator and validator, with a strict float-boundary tolerance for reciprocal integers after CSV/pandas round-trips;
-- added regression tests for the 135- and 333-position reciprocal boundaries and for genuine non-integer cycles;
+- introduced one shared count-jump-cycle function for the generator and validator, using an **8-ULP** reciprocal-integer boundary so CSV/pandas round-trips are normalized without rounding genuine near-integer reciprocals downward;
+- added regression tests for the 135- and 333-position round-trip boundaries, genuine non-integer cycles, and a deliberately close reciprocal that must still map to 136;
 - updated the deterministic reference targets: 48h late events **99,573,018**, 72h revised cells **14,989**, 96h late events **2,733,153**, 96h revised cells **2,011**, and 96h combined planning depth **1,330 days (~3.64 years)**;
 - pinned the 96h audited cycles at **206 late-event positions** and **333 revised-cell positions** in the public claim validator;
 - aligned the reference-summary version with package version **0.31.0** and updated public evidence documentation;
-- increased the unit-test suite to **56 tests** while retaining the full build, rolling-backtest, uncertainty, evidence-plan and pinned-claim validation chain.
+- increased the unit-test suite to **57 tests** while retaining the full build, rolling-backtest, uncertainty, evidence-plan and pinned-claim validation chain.
 
 ## v0.30.0
 
