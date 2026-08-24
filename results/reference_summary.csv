@@ -14,7 +14,7 @@ migration_add_optional_country_action,APPROVE,status,v0.35 additive optional-dim
 migration_broaden_dau_action,WITHHOLD,status,v0.35 semantic app_open to any-event DAU proposal,technically compatible does not imply metric-safe
 migration_rename_event_id_action,WITHHOLD,status,v0.35 breaking required-identifier proposal,existing producers are incompatible
 migration_max_dau_delta_pct,5.274597573,percent,v0.35 current-vs-candidate shadow replay maximum product aggregate shift,synthetic semantic counterexample
-migration_shadow_replay_rows,450,rows,v0.35 three products x 120 days plus mature-history extension in governed replay,count is reference-specific evidence
+migration_shadow_replay_rows,450,rows,v0.35 daily current-vs-candidate Gold shadow replay,reference-specific evidence count
 pricing_experiment_users,8000,users,v0.35 deterministic controlled pricing experiment,synthetic experiment
 pricing_experiment_revenue_effect,0.685080829,GBP_per_user_30d,v0.35 ANCOVA with pre-period revenue and HC3 SE,synthetic experiment
 pricing_experiment_revenue_ci_low,0.551429745,GBP_per_user_30d,v0.35 95% two-sided CI,primary gate requires positive lower bound
