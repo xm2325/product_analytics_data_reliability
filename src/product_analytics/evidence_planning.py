@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from math import ceil, isclose
+from math import ceil, ulp
 
 import pandas as pd
 
@@ -10,16 +10,16 @@ from .uncertainty import DEFAULT_FAMILY_ALPHA, exact_binomial_upper
 
 
 DEFAULT_MAX_PLANNING_TRIALS = 100_000_000
-RECIPROCAL_INTEGER_TOLERANCE = 1e-12
+RECIPROCAL_INTEGER_MAX_ULPS = 8
 
 
 def count_jump_cycle_trials(rate: float) -> int:
     """Return the ceil(1/rate) audit cycle without float-boundary drift.
 
     CSV and pandas round-trips can move an exact reciprocal integer by a few
-    ulps, for example turning 135 into 135.00000000000003. Treat only values
-    within a strict numerical tolerance of an integer as that integer; all
-    other values retain the conservative ceil(1/rate) rule.
+    floating-point units in the last place (ULPs). Treat a reciprocal as an
+    integer only when it is within a small ULP budget of that integer; all other
+    values retain the conservative ceil(1/rate) rule.
     """
     rate = float(rate)
     if not 0 <= rate <= 1:
@@ -28,12 +28,7 @@ def count_jump_cycle_trials(rate: float) -> int:
         return 1
     reciprocal = 1.0 / rate
     nearest_integer = round(reciprocal)
-    if isclose(
-        reciprocal,
-        float(nearest_integer),
-        rel_tol=RECIPROCAL_INTEGER_TOLERANCE,
-        abs_tol=RECIPROCAL_INTEGER_TOLERANCE,
-    ):
+    if abs(reciprocal - float(nearest_integer)) <= RECIPROCAL_INTEGER_MAX_ULPS * ulp(reciprocal):
         return max(1, int(nearest_integer))
     return max(1, int(ceil(reciprocal)))
 
