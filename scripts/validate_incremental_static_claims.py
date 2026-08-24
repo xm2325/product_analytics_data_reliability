@@ -62,8 +62,11 @@ def main() -> None:
             bool(recovery["targeted_repair_restored_exact_output_hashes"])
         ).lower(),
         "full_source_integrity_audit_hashes": str(summary["full_integrity_audit_source_hashes"]),
-        "total_repository_tests": "88",
     }
+    if set(claims) != set(exact) | {"targeted_repair_scan_reduction_fraction"}:
+        raise AssertionError(
+            f"Unexpected incremental claim keys: ledger={sorted(claims)}, expected={sorted(set(exact) | {'targeted_repair_scan_reduction_fraction'})}"
+        )
     for key, expected in exact.items():
         observed = claims.get(key)
         if observed != expected:
@@ -86,7 +89,7 @@ def main() -> None:
     if repair_rows != int(claims["targeted_repair_rows_scanned"]):
         raise AssertionError("Ledger targeted repair rows do not match source partition")
 
-    # Deliberately refuse to make runner wall-clock values stable public claims.
+    # Deliberately refuse to make shared-runner wall-clock values stable public claims.
     timing_claims = [key for key in claims if "seconds" in key or "speedup" in key]
     if timing_claims:
         raise AssertionError(
@@ -94,7 +97,6 @@ def main() -> None:
             f"{timing_claims}"
         )
 
-    # Ensure booleans are actually parseable, rather than accepting arbitrary strings.
     for key in [
         "full_incremental_exact_parity",
         "interrupted_resume_exact_parity",
