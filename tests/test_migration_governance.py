@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from product_analytics.contracts import event_contract
 from product_analytics.migration_governance import (
@@ -53,7 +54,7 @@ def test_shadow_replay_detects_semantic_dau_inflation_without_moving_money_metri
     replay = dau_shadow_replay(_gold())
     summary = summarise_dau_shadow_replay(replay)
     notes = summary.loc[summary["product"].eq("notes_app")].iloc[0]
-    assert notes["portfolio_weighted_dau_delta_pct"] == 11 / 220
+    assert notes["portfolio_weighted_dau_delta_pct"] == pytest.approx(11 / 220)
     assert notes["max_abs_paid_delta"] == 0
     assert notes["max_abs_revenue_delta_gbp"] == 0
 
