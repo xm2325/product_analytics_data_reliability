@@ -25,20 +25,40 @@ The request surface is intentionally bounded:
 
 ## Integrity before serve
 
-The reporting layer does not trust a Parquet file merely because it exists. For each selected month it checks:
+The reporting layer does not trust a Parquet file merely because it exists. Before a selected month is exposed it checks:
 
 1. the canonical source partition SHA and row count in durable state still match the pinned source manifest;
 2. the metric partition is marked complete;
 3. the materialised metric file exists; and
 4. its SHA-256 still matches durable state.
 
-A deliberately corrupted selected metric partition is therefore rejected before data are served.
+This ordering applies even to the first and last metric partitions used during store initialisation to determine historical availability. The checksum/state binding is validated **before DuckDB is allowed to open those files**.
+
+That ordering was strengthened by CI. The first implementation corrupted a boundary Parquet in a test but attempted to read it for date bounds before checking its metric SHA, so DuckDB raised its own `InvalidInputException`. The fix moved integrity validation ahead of every boundary read. The revised test now fails closed with `ReportingContractError` during store construction, while a separate real-data test corrupts the middle `2010-12` partition and proves query-time rejection on a normally selected month.
+
+The lesson is stronger than merely having a checksum somewhere in the code path: **integrity checks must precede the parser/query-engine read they are meant to guard**.
 
 ## Real-data evidence
 
-The pinned source produces 25 monthly metric partitions. The reference seven-day query (`2010-12-01` through `2010-12-07`) reads and hashes one relevant metric partition rather than all 25, a deterministic 96% reduction in partition selection. The seven returned rows exactly reconcile to the already validated `incremental_daily_metrics.csv` layer. A query spanning the November/December boundary selects exactly two partitions.
+The pinned source produces 25 monthly metric partitions over historical availability **2009-12-01 through 2011-12-09**. The reference seven-day query (`2010-12-01` through `2010-12-07`) selects and hashes one relevant metric partition for metric values rather than all 25, a deterministic **96% reduction in metric-partition selection**. The seven returned rows exactly reconcile to the already validated `incremental_daily_metrics.csv` layer. A query spanning the November/December boundary selects exactly two metric partitions.
 
-This is a metric-store work claim, not a wall-clock SLA. GitHub-hosted runner latency remains diagnostic only.
+Store initialisation separately verifies and reads the first/last boundary partitions to establish the available date range. Therefore 96% is not a claim that the entire store lifecycle touches only one file, and it is not a source-row or wall-clock speedup claim.
+
+The reporting evidence is built **after** the v0.37 incremental store exists and does not reparse the XLSX or rebuild the 1,067,371-row canonical source. Stable performance evidence is partition selection/work avoided; GitHub-hosted runner latency remains diagnostic only.
+
+## Response reproducibility
+
+The JSON response includes:
+
+- `schema_version` and `data_product_version`;
+- normalised start/end/metric request;
+- historical availability and the explicit no-ingestion-time boundary;
+- selected partition source and metric SHA-256 provenance;
+- deterministic row count;
+- deterministic response SHA-256; and
+- zero-filled daily records.
+
+The independent validator reconstructs the reference rows directly from `incremental_daily_metrics.csv`, recomputes the response digest without importing the reporting module, checks selected source/state/metric bindings and compares the generated evidence to the checked-in reporting claim ledger.
 
 ## Historical-time boundary
 
