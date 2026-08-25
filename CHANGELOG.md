@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.38.0
+
+- added a **versioned consumer reporting data product** over the validated v0.37 UCI incremental metric store rather than adding another model or presentation layer;
+- exposed five allowlisted daily metrics — `revenue_gbp`, `orders`, `units`, `purchase_lines` and `active_customers` — through a framework-independent Python interface plus JSON/CSV CLI;
+- defined reporting schema **1.0**, explicit historical availability, deterministic response SHA-256, zero-filled missing calendar days and a bounded **366-day** maximum request window;
+- made invalid requests fail closed: unknown/duplicate metrics, reversed ranges, dates outside the historical store and over-wide requests are rejected before metric values are returned;
+- bound selected metric partitions back to the canonical source manifest and durable v0.37 state, requiring complete status, source SHA/row-count identity, metric-file existence and metric SHA agreement before serve;
+- strengthened integrity ordering after the first CI attempt found that a corrupted boundary Parquet could reach DuckDB's date-bound read before the metric SHA guard; boundary integrity is now verified **before DuckDB opens the file**, producing the reporting contract's own fail-closed error rather than a parser exception;
+- retained a separate real-data tamper case on middle partition `2010-12`, proving that a normally selected corrupted partition is also rejected at query time;
+- validated a seven-day real query (`2010-12-01` to `2010-12-07`) against the existing daily layer with **exact response parity** while selecting **1 of 25** monthly metric partitions for metric values, a **96% metric-partition-selection reduction** relative to selecting all 25;
+- validated a cross-month query that selects exactly **2** metric partitions and pinned the reporting store's historical availability at **2009-12-01 through 2011-12-09**;
+- kept the performance claim narrow: store initialisation separately checks/reads the first and last boundary partitions, and 96% is neither an end-to-end latency claim nor a source-row reduction claim;
+- added `build_reporting_product_reference.py`, `validate_reporting_product_reference.py`, `results/reporting_reference_summary.csv` and JSON/CSV CLI smoke tests; the independent validator reconstructs response rows and digests without importing the reporting module;
+- kept the source-time boundary explicit: UCI has event/invoice time but no separate ingestion timestamp, so the data product does not claim real point-in-time/as-of reconstruction, production freshness or network-service SLA behaviour;
+- advanced package/runtime metadata to **0.38.0** and the full repository test suite from **88 to 93 tests** while preserving the v0.35 controlled, v0.36 portability and v0.37 recovery/performance evidence lanes.
+
 ## v0.37.0
 
 - converted the v0.36 UCI Online Retail II lane from full-snapshot-only processing into a **recoverable incremental data product** while keeping the same pinned **1,067,371-row** public real source;
@@ -56,7 +72,7 @@
 
 - separated counterfactual product impact from decision-authorised impact after the pricing experiment remained **HOLD**;
 - added a 150,000-user hypothetical launch scenario with **£102,762.12** counterfactual 30-day revenue impact while authorised exposure remained zero;
-- added conditional paid-guardrail evidence planning with a first passing equal-allocation target of **6,393 users per arm**.
+- added conditional paid-guardrail evidence planning with a first passing equal-allocation target of **6,393 users per arm**, +2,393 per arm from the current 4,000.
 
 ## v0.32.0
 
