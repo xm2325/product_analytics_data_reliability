@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.39.0
+
+- added **governed consumer-contract evolution** over the v0.38 reporting data product, keeping the data-product release version separate from the public response-schema version;
+- preserved JSON schema **1.0 as the default** so existing/unversioned consumers are not silently migrated, while adding explicit opt-in schema **1.1** through `--schema-version 1.1`;
+- made schema 1.1 strictly additive over 1.0: the existing nine top-level fields remain unchanged and one new top-level `contract` object exposes the schema family, negotiated version, explicit backward-compatibility path and deterministic metric-catalogue SHA-256;
+- kept the stable response hash defined over the query plus metric rows, so the same real-data request produces identical query payload, metric rows, response SHA-256 and deterministic partition work under schema 1.0 and 1.1;
+- added field-level schema specifications covering the top-level response, query, availability, partition provenance, row base fields, metric types and 1.1 contract metadata;
+- added three governed migration proposals: additive `contract` metadata is **APPROVE**, while renaming `row_count` to `rows` and changing `orders` from integer to float are both **BREAKING / WITHHOLD**;
+- made removals, renames and type changes non-compensatory consumer gates rather than allowing an otherwise useful release to overwrite a published contract;
+- added a strict response-shape check before responses leave the reporting layer and fail-closed rejection of unsupported schema versions;
+- added a real UCI compatibility replay using the seven-day `2010-12-01` to `2010-12-07` query; schema 1.0 and 1.1 retain exact query/data/hash/work parity and schema 1.1 adds only the declared `contract` envelope;
+- added `build_consumer_contract_reference.py`, serialised schema registry/migration/sample-response evidence, and `results/consumer_contract_reference_summary.csv`;
+- added `validate_consumer_contract_reference.py`, an independent validator that does **not** import the production classifier: it reconstructs field maps, recomputes all migration classifications/actions, independently recomputes both response hashes and independently recomputes the metric-catalogue SHA;
+- extended the operational GitHub Actions lane to run default schema 1.0, explicit schema 1.1 and CSV smoke tests after the existing 1,067,371-row incremental/reporting evidence chain;
+- kept the compatibility claim explicit: additive does not mean every possible parser accepts unknown fields; strict old consumers retain schema 1.0 negotiation, and no production deprecation/support-lifetime SLA is claimed;
+- advanced package/runtime metadata to **0.39.0**, advanced the focused incremental/reporting/contract suite to **15 tests**, and advanced the full repository suite from **93 to 99 tests** while keeping the v0.35–v0.38 evidence gates intact.
+
 ## v0.38.0
 
 - added a **versioned consumer reporting data product** over the validated v0.37 UCI incremental metric store rather than adding another model or presentation layer;
@@ -27,9 +44,7 @@
 - added a separate source-revision unit test that changes one canonical month and its manifest, verifies only that month is recomputed, then restores the original month and exact clean-rebuild parity;
 - added `validate_incremental_retail_reference.py`, which independently SHA-verifies every canonical source partition, rebuilds daily metrics directly from source Parquet in DuckDB and checks full/incremental/recovery/repair parity and work accounting;
 - added `results/incremental_reference_summary.csv` and `validate_incremental_static_claims.py` to pin deterministic performance evidence while deliberately **rejecting wall-clock seconds/speedups as stable public claims**;
-- diagnosed the main first-load bottleneck as XLSX decompression/XML parsing and canonical type conversion: one post-optimisation GitHub Actions run observed about **54.99 s** for source parse/normalisation versus **0.100 s** for a clean full DuckDB rebuild from canonical Parquet;
-- found and fixed an implementation-level incremental overhead: the first version opened one DuckDB connection per partition and scanned each changed partition once for `COUNT(*)` and again for aggregation; v0.37 now reuses **one DuckDB connection per run** and performs **one aggregation scan per changed partition**;
-- after that refactor, observed initial incremental materialisation changed from **0.591 s to 0.269 s** across two diagnostic shared-runner executions (~54.5% lower); these timings are retained as diagnostic evidence only, not a performance SLA;
+- diagnosed the main first-load bottleneck as XLSX decompression/XML parsing and canonical type conversion; shared-runner timings remain diagnostic rather than public performance gates;
 - retained an explicit expensive full-source integrity audit while making normal no-op processing trust the pinned immutable canonical manifest, so routine idempotent runs do not re-hash every large source partition;
 - added `incremental-real-data` GitHub Actions and `make incremental-check`, separate from both the controlled synthetic and v0.36 real-data portability lanes;
 - preserved the source-time boundary: `InvoiceDate` drives historical monthly replay but is not represented as ingestion time, so no real-data late-arrival, watermark or arrival-order claim is introduced;
@@ -39,19 +54,14 @@
 
 - added a **real-world external-data portability lane** using the official UCI Online Retail II source rather than extending the synthetic generator;
 - made the network-enabled GitHub Actions workflow download the public UCI source directly, while keeping the raw workbook out of the repository and uploaded evidence bundle;
-- pinned the accepted source archive at **45,622,418 bytes / SHA-256 `572e36277c2390fbfde10664750731e0a86f55e33470d91919085f0408e67bfb`** and the extracted workbook at **45,622,278 bytes / SHA-256 `bcbe73b35f5b7babf197fb0cb983a11f5d9ff929078d4aa53d171b1f2df2e980`**, so upstream replacement requires explicit review;
-- added a source adapter for both workbook vintages, including `Invoice`/`InvoiceNo`, `Price`/`UnitPrice` and `Customer ID`/`CustomerID` aliases, and mapped **1,067,371** source rows to one canonical transaction representation;
-- added a real-data quality report covering **243,007 missing CustomerID rows, 19,494 cancellations, 22,950 non-positive quantities, 6,207 non-positive unit prices and 12,133 exact duplicate rows** excluding the generated source-row identifier;
-- defined a source-specific purchase metric contract and built a continuous **739-day** daily layer for purchase revenue, orders, units, purchase lines and identifiable active customers;
-- fixed a real-data portability bug found by CI: days containing anonymous valid purchases but no identifiable customer previously produced `NaN` active customers after the identity join; the metric now correctly records **0 identifiable active customers**;
-- tested two candidate semantic drop-in replacements against the declared 1% compatibility tolerance: signed transaction value moves purchase revenue by **-8.04%** and any-transaction customer population moves the purchasing-customer population by **+1.09%**, so both are **WITHHOLD_AS_DROP_IN_REPLACEMENT**;
-- reused the frozen v0.35 forecast contract without post-hoc tuning on four external series; all four candidates beat the last-value benchmark on WAPE but **0/4 are planning-approved** because at least one absolute-accuracy gate remains failed;
-- retained the strongest real-data boundary case: `orders` has **15.31% WAPE** and about **59% lower WAPE than the last-value benchmark**, but **20.94% MAPE** exceeds the pre-existing 20% limit, so the decision stays **WITHHOLD**;
-- added `validate_real_retail_reference.py`, which re-extracts and reloads all source rows, recomputes quality and daily metrics in DuckDB SQL, and independently rebuilds semantic and forecast decisions;
-- added `results/real_data_reference_summary.csv` plus `validate_real_static_claims.py`, binding public real-data claims to generated evidence in CI;
-- added a separate `real-data` workflow and `make real-check`; the default synthetic `make check` remains separate so controlled point-in-time evidence does not depend on network access;
+- pinned the accepted source archive at **45,622,418 bytes / SHA-256 `572e36277c2390fbfde10664750731e0a86f55e33470d91919085f0408e67bfb`** and the extracted workbook at **45,622,278 bytes / SHA-256 `bcbe73b35f5b7babf197fb0cb983a11f5d9ff929078d4aa53d171b1f2df2e980`** so upstream replacement requires explicit review;
+- mapped **1,067,371** source rows to one canonical transaction representation and added real-data quality, metric semantics and frozen forecast validation;
+- fixed a real-data portability bug where anonymous-only purchase days produced `NaN` active customers, representing them correctly as **0 identifiable active customers**;
+- tested two semantic replacements against the declared 1% compatibility tolerance: signed transaction value moves purchase revenue by **-8.04%** and any-transaction customer population moves purchasing-customer population by **+1.09%**, so both are withheld as silent drop-ins;
+- reused the frozen v0.35 forecast contract without post-hoc tuning; **0/4** external forecast metrics are planning-approved, including the useful `orders` boundary case with **15.31% WAPE** but **20.94% MAPE** above the frozen 20% gate;
+- added independent DuckDB/Python real-data reconstruction and checked-in public claim validation;
 - explicitly refused to claim real-data late-arrival/watermark validation because UCI Online Retail II exposes invoice/event time but no separate ingestion timestamp;
-- advanced package/runtime version metadata to **0.36.0** and the full repository test suite from **81 to 84 tests**, while preserving the v0.35 controlled reference with **53 SHA-256-manifested artifacts**.
+- advanced package/runtime metadata to **0.36.0** and the full repository test suite from **81 to 84 tests**.
 
 ## v0.35.0
 
