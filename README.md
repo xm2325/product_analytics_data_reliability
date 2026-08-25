@@ -1,11 +1,11 @@
 # Product Analytics & Data Reliability Workbench
 
-**Version:** v0.37  
+**Version:** v0.38  
 **Stack:** Python · DuckDB · SQL · Pandas · NumPy · SciPy · Statsmodels · Parquet · Pytest · GitHub Actions
 
-A reproducible analytics workbench for deciding when data, metrics, forecasts and experiments are trustworthy enough to support a business decision — and whether the underlying data product can be replayed, recovered and updated without unnecessary full recomputation.
+A reproducible analytics workbench for deciding when data, metrics, forecasts and experiments are trustworthy enough to support a business decision — and for exposing validated metrics through a bounded, versioned consumer contract without giving up provenance, recovery or performance discipline.
 
-The repository now has three complementary evidence layers:
+The repository now has four complementary evidence layers:
 
 ```text
 controlled synthetic evidence
@@ -19,11 +19,77 @@ public real-world evidence
 real-world operational evidence
     -> immutable partitions, incremental processing, idempotency,
        interruption recovery, targeted repair and performance diagnosis
+
+consumer data-product evidence
+    -> versioned metric catalog, bounded historical queries, zero-fill,
+       selected-partition provenance, integrity-before-serve and JSON/CSV outputs
 ```
 
-The design principle is unchanged: **a technically successful calculation is not automatically a trustworthy or operationally efficient decision input**.
+The design principle is unchanged: **a technically successful calculation is not automatically a trustworthy, operationally efficient or safely consumable decision input**.
 
-## v0.37 headline: incremental processing, recovery and performance
+## v0.38 headline: a versioned reporting data product
+
+v0.38 turns the validated v0.37 real-data metric store into a small consumer-facing data product rather than adding another model or dashboard. The implementation is deliberately framework-free: Python defines the stable contract, DuckDB reads only relevant metric partitions, and a CLI exposes JSON or CSV. A future network transport can change without redefining metric semantics.
+
+Five allowlisted daily metrics are available:
+
+- `revenue_gbp`
+- `orders`
+- `units`
+- `purchase_lines`
+- `active_customers`
+
+Every JSON response carries the schema/data-product versions, normalised query, historical availability, selected metric-partition provenance, row count, deterministic response SHA-256 and data rows. Missing calendar days are explicitly zero-filled instead of being ambiguous missing rows.
+
+| v0.38 consumer check | Validated result |
+|---|---:|
+| Reporting schema | **1.0** |
+| Allowlisted daily metrics | **5** |
+| Backing metric partitions | **25** |
+| Historical availability | **2009-12-01 → 2011-12-09** |
+| Maximum query span | **366 days** |
+| Reference query | **7 days** |
+| Metric-value partitions selected for reference query | **1 / 25** |
+| Metric-partition selection reduction | **96%** |
+| Reference response vs validated daily layer | **exact match** |
+| Cross-month reference query | **exactly 2 partitions** |
+| Unknown metric | **rejected** |
+| Over-wide / invalid range | **rejected** |
+| Deliberately corrupted selected partition | **rejected before serve** |
+| JSON / CSV CLI smoke tests | **PASS** |
+| Full repository tests | **93 passed** |
+
+The 96% figure is deliberately narrow: it is a reduction in **metric-value partition selection** for the seven-day reference query relative to reading all 25 monthly metric partitions. Store initialisation separately integrity-checks and reads the first/last boundary partitions to establish historical availability. It is not claimed as a 96% end-to-end latency or source-row reduction.
+
+### Integrity must happen before the query engine reads data
+
+The first v0.38 CI attempt exposed an ordering flaw. A test deliberately corrupted a boundary Parquet file; the store tried to read that file with DuckDB to determine date bounds before validating its SHA-256, so DuckDB raised its own `InvalidInputException` before the reporting contract could fail closed.
+
+The implementation was changed so boundary partitions are checked **before any DuckDB read**:
+
+```text
+canonical source manifest
+        +
+durable incremental state
+        +
+metric file existence / SHA-256
+        ↓
+all bindings agree
+        ↓
+DuckDB may read the partition
+```
+
+The next CI run correctly raised `ReportingContractError` during store construction. A separate real-data tamper case corrupts the middle `2010-12` metric partition and confirms it is rejected when selected by a query. This keeps integrity checking on both the metadata-boundary and normal query paths.
+
+### Consumer requests are intentionally bounded
+
+The interface rejects unknown or duplicate metric names, reversed ranges, dates outside the available historical store and requests longer than 366 days. A seven-day December 2010 request selects the single `2010-12` metric partition for metric values; a query crossing the November/December boundary selects exactly two.
+
+The reporting layer reuses already validated v0.37 metric partitions. It does **not** reparse the 45 MB XLSX or rescan the 1,067,371-row canonical source merely to serve a consumer request.
+
+See [`docs/REPORTING_DATA_PRODUCT.md`](docs/REPORTING_DATA_PRODUCT.md).
+
+## v0.37: incremental processing, recovery and performance
 
 v0.37 keeps the pinned **UCI Online Retail II** source used in v0.36 — **1,067,371 real historical transaction rows** — but stops treating every run as a full rebuild.
 
@@ -58,31 +124,19 @@ exact reconciliation to clean full rebuild
 | Repair scan reduction vs full source | **93.91%** |
 | Repaired output hashes restored | **exact match** |
 | Explicit full source integrity audit | **25 / 25 SHA-verified** |
-| Full repository tests | **88 passed** |
+| v0.37 release tests | **88 passed** |
 
 The checked-in v0.37 claim ledger pins the deterministic work counts above. It deliberately does **not** pin shared-runner wall-clock timings.
 
 ### Why performance was slow
 
-The first performance investigation separated two different problems.
+The v0.37 investigation separated two different problems.
 
-**1. Source-format bottleneck.** The official source is XLSX. In a post-optimisation CI run, decompressing/parsing the workbook and normalising 1.07M rows took about **54.99 s**. Once converted to canonical Parquet, a clean DuckDB aggregation over the full source took only about **0.100 s**. The dominant first-load cost is therefore Excel/XML parsing, not metric aggregation.
+**1. Source-format bottleneck.** The official source is XLSX. GitHub Actions repeatedly shows that decompressing/parsing the workbook and normalising 1.07M rows dominates first load, while a clean DuckDB aggregation over canonical Parquet is tiny by comparison. The source format, not analytical SQL, is the main first-load bottleneck.
 
-**2. Initial incremental implementation overhead.** The first v0.37 implementation opened a DuckDB connection per monthly partition and scanned each changed partition twice: once for `COUNT(*)`, then again for aggregation. It was correct, but the observed initial incremental materialisation took **0.591 s**.
+**2. Initial incremental implementation overhead.** The first implementation opened a DuckDB connection per monthly partition and scanned each changed partition twice: once for `COUNT(*)`, then again for aggregation. It was correct but wasteful. The implementation now uses one DuckDB connection per run, manifest-certified row counts and one aggregation scan per changed partition.
 
-The implementation was changed to:
-
-```text
-one DuckDB connection per run
-+ manifest-certified row counts
-+ one source scan per changed partition
-```
-
-A subsequent CI run observed **0.269 s**, about **54.5% lower** than the earlier diagnostic run. These timings come from different shared GitHub runners and are therefore diagnostic, not an SLA or a universal 2× speed claim.
-
-### What is actually performance-gated
-
-Deterministic work reduction is the contract:
+Wall-clock differences across shared GitHub runners remain diagnostic only; deterministic work avoided is the performance contract.
 
 | Operation | Source rows scanned | Reduction vs 1,067,371-row full scan |
 |---|---:|---:|
@@ -91,7 +145,7 @@ Deterministic work reduction is the contract:
 | Targeted `2010-12` repair | **65,004** | **93.91%** |
 | Restart after seven durable partitions | **810,326** | **24.08%** |
 
-This avoids a misleading claim that partitioning must always beat a single vectorised full scan. On this local 1M-row Parquet dataset, a clean full DuckDB aggregation is already extremely fast; the incremental design is valuable because unchanged/repaired/restarted runs do not repeat irrelevant source work and because the state is recoverable and auditable.
+This avoids a misleading claim that partitioning must always beat a single vectorised full scan. On this local 1M-row Parquet dataset, a clean full DuckDB aggregation is already extremely fast; incremental processing matters because unchanged/repaired/restarted runs do not repeat irrelevant source work and because the state is recoverable and auditable.
 
 See [`docs/INCREMENTAL_RECOVERY_PERFORMANCE.md`](docs/INCREMENTAL_RECOVERY_PERFORMANCE.md).
 
@@ -133,8 +187,8 @@ Two plausible alternative definitions fail as silent drop-in replacements:
 
 | Proposed replacement | Shift | Decision |
 |---|---:|---|
-| positive non-cancelled purchase revenue -> signed transaction ledger | **-8.04%** | **WITHHOLD** |
-| purchasing-customer population -> any-transaction customer population | **+1.09%** | **WITHHOLD** |
+| positive non-cancelled purchase revenue → signed transaction ledger | **-8.04%** | **WITHHOLD** |
+| purchasing-customer population → any-transaction customer population | **+1.09%** | **WITHHOLD** |
 
 The alternative metrics may be useful under new names; the result only says they are not backward-compatible replacements within the declared 1% semantic tolerance.
 
@@ -142,7 +196,7 @@ See [`docs/REAL_DATA_PORTABILITY.md`](docs/REAL_DATA_PORTABILITY.md).
 
 ## Controlled evidence: reproduce hard decision boundaries
 
-Synthetic data remain useful where the public real source lacks the required fields or where a controlled counterexample is the point of the test.
+Synthetic data remain useful where the public real source lacks required fields or where a controlled counterexample is the point of the test.
 
 ### Contract evolution
 
@@ -152,7 +206,7 @@ v0.35 separates producer compatibility, metric semantic safety and downstream de
 |---|---|---:|---:|---:|---|
 | add optional `country` | ADDITIVE | PASS | PASS | PASS | **APPROVE** |
 | broaden DAU to any certified event | SEMANTIC | PASS | **FAIL** | PASS | **WITHHOLD** |
-| rename required `event_id` -> `event_uuid` | BREAKING | **FAIL** | PASS | PASS | **WITHHOLD** |
+| rename required `event_id` → `event_uuid` | BREAKING | **FAIL** | PASS | PASS | **WITHHOLD** |
 
 The semantic case uses a **450 product-day shadow replay**. Aggregate DAU moves by +4.94%, +2.04% and +4.04% while all three downstream DAU forecast eligibility states remain unchanged. Stable downstream decisions do not compensate for a materially changed KPI definition.
 
@@ -178,30 +232,32 @@ See [`docs/WATERMARK_STABILITY.md`](docs/WATERMARK_STABILITY.md), [`docs/WATERMA
 
 ## Validation architecture
 
-Three independent CI lanes protect different evidence boundaries.
+Three independent CI lanes protect different evidence boundaries; the operational lane now also validates the consumer contract.
 
 ```text
 controlled synthetic lane
-  pytest (88 repository tests)
-  -> deterministic reference build
-  -> forecast / migration / watermark / uncertainty validators
-  -> experiment / impact validators
-  -> pinned and static claim validators
+  pytest (93 repository tests)
+  → deterministic reference build
+  → forecast / migration / watermark / uncertainty validators
+  → experiment / impact validators
+  → pinned and static claim validators
 
 real-data portability lane
   official pinned UCI download
-  -> source adapter / quality / metrics
-  -> semantic and frozen forecast evidence
-  -> independent DuckDB/Python recomputation
-  -> checked-in real-data claim ledger
+  → source adapter / quality / metrics
+  → semantic and frozen forecast evidence
+  → independent DuckDB/Python recomputation
+  → checked-in real-data claim ledger
 
-incremental operational lane
+incremental operational + reporting lane
   official pinned UCI download
-  -> canonical 25-partition Parquet snapshot
-  -> interruption / no-op / repair scenarios
-  -> independent full rebuild parity
-  -> source/output SHA audit
-  -> checked-in deterministic work ledger
+  → canonical 25-partition Parquet snapshot
+  → interruption / no-op / repair scenarios
+  → independent full rebuild parity + source/output SHA audit
+  → versioned five-metric reporting contract
+  → 1/25 and cross-month partition-pruning checks
+  → tamper rejection + independent response reconciliation
+  → JSON / CSV consumer smoke tests
 ```
 
 ## Reproduce
@@ -214,27 +270,40 @@ pip install -e .
 
 make check             # controlled deterministic lane
 make real-check        # network-enabled UCI portability lane
-make incremental-check # network-enabled v0.37 recovery/performance lane
+make incremental-check # network-enabled v0.38 recovery/performance/reporting lane
+```
+
+After `make incremental-check`, query the data product directly:
+
+```bash
+python scripts/query_retail_metrics.py \
+  --incremental-dir build/incremental-retail \
+  --start 2010-12-01 \
+  --end 2010-12-07 \
+  --metrics revenue_gbp,orders,active_customers \
+  --format json
 ```
 
 ## Claim boundaries
 
 - UCI Online Retail II is public real-world historical transaction data; this repository is not a production deployment and does not claim access to a company's private systems.
-- `InvoiceDate` is event time, **not ingestion time**. Monthly v0.37 partitions represent historical replay, not real arrival order.
-- Real-data late-arrival, watermark or processing-time SLA behaviour is therefore not claimed; those remain controlled synthetic evidence.
+- `InvoiceDate` is event time, **not ingestion time**. Real-data late-arrival, watermark, processing-time SLA and point-in-time/as-of reconstruction are therefore not claimed.
+- The reporting layer is a local Python/CLI data-product boundary, not a deployed network service or production availability/latency claim.
+- The v0.38 **96%** figure is metric-partition-selection reduction for the pinned seven-day query, not source-row reduction and not a latency speedup.
 - The 1% semantic tolerance is a declared workbench governance threshold, not a universal industry threshold.
 - Forecast thresholds were frozen before the external evaluation; failed real-data gates are reported rather than tuned away.
-- Shared GitHub-runner timings are diagnostic only. Public performance claims are based on deterministic rows/partitions scanned and exact parity.
-- v0.37 is single-node DuckDB/Parquet evidence; it does not claim distributed-system, object-store or production-network benchmarks.
+- Shared GitHub-runner timings are diagnostic only. Public performance claims use deterministic rows/partitions selected or scanned and exact parity.
+- The operational evidence is single-node DuckDB/Parquet; it does not claim distributed-system, object-store or production-network benchmarks.
 
 The progression is:
 
 ```text
 trust the source
--> define the metric explicitly
--> preserve point-in-time semantics
--> test decisions without leakage
--> validate on external real data
--> update incrementally without losing reproducibility
--> recover and repair without silently changing the answer
+→ define the metric explicitly
+→ preserve point-in-time semantics where the source supports them
+→ test decisions without leakage
+→ validate on external real data
+→ update incrementally without losing reproducibility
+→ recover and repair without silently changing the answer
+→ expose validated metrics through a bounded, versioned consumer contract
 ```
