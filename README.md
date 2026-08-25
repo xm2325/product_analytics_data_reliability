@@ -1,11 +1,11 @@
 # Product Analytics & Data Reliability Workbench
 
-**Version:** v0.39  
+**Version:** v0.40  
 **Stack:** Python · DuckDB · SQL · Pandas · NumPy · SciPy · Statsmodels · Parquet · Pytest · GitHub Actions
 
-A reproducible analytics workbench for deciding when data, metrics, forecasts and experiments are trustworthy enough to support a business decision — and for exposing validated metrics through a bounded consumer contract that can evolve without silently breaking existing consumers.
+A reproducible analytics workbench for deciding when data, metrics, forecasts and experiments are trustworthy enough to support a business decision — and for exposing validated metrics through a bounded consumer interface that remains reproducible as data, contracts and concurrent consumers evolve.
 
-The repository has five complementary evidence layers:
+The repository has six complementary evidence layers:
 
 ```text
 controlled synthetic evidence
@@ -18,7 +18,7 @@ public real-world evidence
 
 real-world operational evidence
     -> immutable partitions, incremental processing, idempotency,
-       interruption recovery, targeted repair and performance diagnosis
+       interruption recovery, targeted repair and work diagnosis
 
 consumer data-product evidence
     -> bounded historical queries, metric catalogue, zero-fill,
@@ -27,88 +27,107 @@ consumer data-product evidence
 consumer contract-evolution evidence
     -> explicit schema negotiation, field-level compatibility classification,
        golden real-data responses and breaking-change gates
+
+multi-consumer execution evidence
+    -> request-local query engines, serial/concurrent exact parity,
+       deterministic work accounting and failure isolation
 ```
 
-The design principle is unchanged: **a technically successful calculation is not automatically a trustworthy, operationally efficient, safely consumable or backward-compatible decision input**.
+The design principle is unchanged: **a calculation is not trustworthy merely because it ran successfully, and an interface is not safely scalable merely because it serves one correct request.**
 
-## v0.39 headline: evolve the interface without silently migrating consumers
+## v0.40 headline: concurrent consumers must not change the answer
 
-v0.39 separates the **data-product release version** from the **consumer response schema version**. The package advances to `0.39.0`, but existing JSON consumers still receive schema **1.0** unless they explicitly request schema **1.1**.
+v0.40 keeps the v0.39 response schemas and metric semantics unchanged, but strengthens the execution boundary. The reporting store no longer reuses one mutable DuckDB connection across consumer queries. Immutable manifest/state metadata are shared; **every query creates and closes its own ephemeral DuckDB connection**.
 
-Schema 1.1 is deliberately small. It adds one top-level `contract` object containing the schema family, negotiated version, an explicit backward-compatibility path and a deterministic SHA-256 of the metric catalogue. It does not redefine the five metrics, reparse the source workbook or change partition selection.
+The real reference workload runs on the same pinned **1,067,371-row UCI Online Retail II** source and 25-partition metric store used by v0.37–v0.39.
 
-| v0.39 contract-evolution check | Validated result |
+| v0.40 workload-isolation check | Validated result |
 |---|---:|
-| Data-product version | **0.39.0** |
-| Schema family | **`retail-daily-metrics`** |
-| Default JSON schema | **1.0** |
-| Latest opt-in JSON schema | **1.1** |
-| Supported schemas | **2** |
-| Schema 1.0 top-level fields | **9** |
-| Schema 1.1 top-level fields | **10** |
-| Additional 1.1 top-level field | **`contract` only** |
-| Real compatibility query | **7 days** |
-| 1.0 ↔ 1.1 query payload | **exact match** |
-| 1.0 ↔ 1.1 metric rows | **exact match** |
-| 1.0 ↔ 1.1 query/data response SHA-256 | **exact match** |
-| 1.0 ↔ 1.1 deterministic work selection | **exact match** |
-| Unsupported schema | **rejected** |
-| Governed migration proposals | **3** |
-| Additive migrations approved | **1** |
-| Breaking migrations withheld | **2** |
-| Contract/incremental/reporting focused tests | **15 passed** |
-| Full repository tests | **99 passed** |
+| Data-product version | **0.40.0** |
+| Default / latest JSON schema | **1.0 / 1.1** |
+| Valid requests / consumers | **12 / 12** |
+| Concurrent workers | **8** |
+| Mixed workload requests | **15** |
+| Injected invalid consumers | **3** |
+| Intended failures isolated | **3 / 3** |
+| Aggregate metric partitions selected | **27** |
+| Aggregate selected metric files SHA-verified | **27** |
+| Unique metric partitions touched | **16** |
+| Aggregate response rows | **652** |
+| Serial vs concurrent compact results | **exact parity** |
+| Serial vs concurrent workload digest | **exact parity** |
+| Healthy results preserved inside mixed workload | **PASS** |
+| Healthy results preserved after failure batch | **PASS** |
+| Parallel consumers on the same hot window | **6** |
+| Unique full-payload hashes across those six | **1** |
+| Matched schema 1.0/1.1 core response hash | **exact parity** |
+| Operational focused tests | **17 passed** |
+| Full repository tests | **101 passed** |
 
-The compatibility evidence runs on the same validated **1,067,371-row UCI Online Retail II** source used by the real operational lane. The pinned query is `2010-12-01` through `2010-12-07`. Both schema versions return the same query, same metric rows, same stable query/data hash and the same selected-partition work; schema 1.1 changes only the negotiated envelope.
+The deterministic workload fingerprint is:
 
-### No silent default migration
-
-An unversioned call remains on schema 1.0:
-
-```bash
-python scripts/query_retail_metrics.py \
-  --incremental-dir build/incremental-retail \
-  --start 2010-12-01 \
-  --end 2010-12-07 \
-  --metrics revenue_gbp,orders,active_customers \
-  --format json
+```text
+ef1adcc2dc091ad9ad00c16175ea7b38c8f6fec084c4c1700c6c50c127376e7e
 ```
 
-Consumers opt in to the additive schema explicitly:
+### Why not put a lock around one shared connection?
 
-```bash
-python scripts/query_retail_metrics.py \
-  --incremental-dir build/incremental-retail \
-  --start 2010-12-01 \
-  --end 2010-12-07 \
-  --metrics revenue_gbp,orders,active_customers \
-  --format json \
-  --schema-version 1.1
+A lock would make one mutable query engine safe by serialising access, but it would not create a clean consumer-isolation boundary. v0.40 instead keeps the store metadata immutable and request-independent while moving DuckDB query execution into request-local connections:
+
+```text
+canonical manifest + durable state + metric partitions
+                      ↓
+               immutable store
+                      ↓
+        ┌─────────────┼─────────────┐
+        ↓             ↓             ↓
+   consumer A     consumer B     consumer C
+   DuckDB conn    DuckDB conn    DuckDB conn
+        ↓             ↓             ↓
+      close          close          close
 ```
 
-CSV remains the stable date/metric row projection; schema negotiation governs the JSON envelope.
+The six repeated hot-window consumers therefore read the same declared data, return one identical full-payload hash and do not share query-engine state.
 
-### Breaking changes are non-compensatory
+### A bad consumer must not poison healthy consumers
 
-Three concrete proposals are classified field by field against published schema 1.0:
+The mixed 15-request workload adds three deliberately invalid requests to the 12 valid requests:
 
-| Proposal | Classification | Decision | Reason |
-|---|---|---|---|
-| add `contract` metadata through explicit schema 1.1 | ADDITIVE | **APPROVE** | Existing consumers can remain on negotiated schema 1.0. |
-| rename `row_count` → `rows` | BREAKING | **WITHHOLD** | A published top-level field disappears. |
-| change `orders` from integer → float | BREAKING | **WITHHOLD** | A published metric type changes. |
+- unknown metric;
+- unsupported schema `2.0`;
+- duplicate metric name.
 
-The independent CI validator does not import the production classifier. It reconstructs the serialised schema field maps, recomputes all three diffs/actions, independently recomputes both query/data response hashes and independently recomputes the metric-catalogue SHA.
+All three fail through `ReportingContractError`. Every healthy request in the same concurrent batch remains exactly equal to its serial baseline, including response payload hash, query/data response SHA, selected partitions and returned rows. Replaying all healthy requests after the failure batch also reproduces the same baseline.
 
-**Compatibility boundary:** `ADDITIVE` is not a claim that every possible JSON parser accepts unknown fields. A strict existing client can continue to request schema 1.0. No production deprecation schedule or support-lifetime SLA is claimed.
+The independent validator does not import the workload harness. It constructs its own serial and threaded replays, reconciles successful responses back to `incremental_daily_metrics.csv`, recomputes response hashes, recomputes work accounting and verifies the exact failure set.
+
+### Performance claim boundary
+
+v0.40 deliberately has **no QPS, latency, throughput or speedup gate**. Shared GitHub runners are unsuitable evidence for a stable capacity claim. The public contract is result isolation plus deterministic work accounting: 12 valid requests selected 27 metric partitions in aggregate, returned 652 rows and produced the same workload digest under serial and 8-worker concurrent execution.
+
+This remains a **single-node DuckDB/Parquet reference**, not a deployed network service, distributed database, tenant-quota system or production concurrency SLA.
+
+See [`docs/WORKLOAD_ISOLATION.md`](docs/WORKLOAD_ISOLATION.md).
+
+## v0.39: evolve the interface without silently migrating consumers
+
+v0.39 separates the data-product release version from the consumer response schema. Existing/unversioned JSON consumers remain on schema **1.0**; schema **1.1** is explicit opt-in and adds only a top-level `contract` metadata object.
+
+The same seven-day real-data query under schemas 1.0 and 1.1 preserves the query payload, metric rows, query/data response SHA and deterministic partition work exactly. Three governed migration proposals demonstrate one additive **APPROVE** and two breaking **WITHHOLD** decisions:
+
+| Proposal | Classification | Decision |
+|---|---|---|
+| add negotiated `contract` metadata | ADDITIVE | **APPROVE** |
+| rename `row_count` → `rows` | BREAKING | **WITHHOLD** |
+| change `orders` integer → float | BREAKING | **WITHHOLD** |
+
+Additive does not mean every possible parser accepts unknown fields; a strict existing consumer can continue requesting schema 1.0. No production support-lifetime or deprecation SLA is claimed.
 
 See [`docs/CONSUMER_CONTRACT_EVOLUTION.md`](docs/CONSUMER_CONTRACT_EVOLUTION.md).
 
-## v0.38: a bounded reporting data product
+## v0.38: bounded reporting data product
 
-v0.38 turned the validated v0.37 real-data metric store into a small consumer-facing data product rather than adding another model or dashboard. Python defines the stable contract, DuckDB reads only relevant metric partitions, and the CLI exposes JSON or CSV.
-
-Five allowlisted daily metrics are available:
+Five allowlisted daily metrics are exposed through a framework-independent Python interface and JSON/CSV CLI:
 
 - `revenue_gbp`
 - `orders`
@@ -116,134 +135,69 @@ Five allowlisted daily metrics are available:
 - `purchase_lines`
 - `active_customers`
 
-Every JSON response carries the schema/data-product versions, normalised query, historical availability, selected metric-partition provenance, row count, deterministic response SHA-256 and data rows. Missing calendar days are explicitly zero-filled.
-
-| reporting check | Validated result |
-|---|---:|
-| Backing metric partitions | **25** |
-| Historical availability | **2009-12-01 → 2011-12-09** |
-| Maximum query span | **366 days** |
-| Reference query | **7 days** |
-| Metric-value partitions selected | **1 / 25** |
-| Metric-partition selection reduction | **96%** |
-| Response vs validated daily layer | **exact match** |
-| Cross-month reference query | **exactly 2 partitions** |
-| Unknown metric | **rejected** |
-| Over-wide / invalid range | **rejected** |
-| Deliberately corrupted selected partition | **rejected before serve** |
-
-The **96%** figure is deliberately narrow: it is a reduction in metric-value partition selection for the seven-day reference query relative to reading all 25 monthly metric partitions. Store initialisation separately integrity-checks and reads the first/last boundary partitions. It is not a 96% end-to-end latency or source-row reduction claim.
-
-The first v0.38 CI attempt exposed an integrity-ordering flaw: DuckDB tried to open a deliberately corrupted boundary Parquet before the reporting layer validated its SHA. The implementation was changed so canonical source binding, durable state and metric SHA all agree **before DuckDB may read the file**. A second real-data tamper case on middle partition `2010-12` confirms query-time rejection too.
-
-The reporting layer reuses validated metric partitions. It does **not** reparse the 45 MB XLSX or rescan the 1,067,371-row canonical source merely to answer a consumer query.
+The reporting store covers **2009-12-01 through 2011-12-09**, limits a request to **366 days**, zero-fills missing calendar days and SHA-verifies selected metric partitions before serving them. The pinned seven-day query selects **1 of 25** monthly metric partitions for metric values — a **96% partition-selection reduction**, not a latency claim — and exactly reconciles to the validated daily layer. A cross-month query selects exactly two partitions; unknown, over-wide and tampered requests fail closed.
 
 See [`docs/REPORTING_DATA_PRODUCT.md`](docs/REPORTING_DATA_PRODUCT.md).
 
-## v0.37: incremental processing, recovery and performance
+## v0.37: incremental recovery and deterministic work reduction
 
-v0.37 keeps the pinned UCI Online Retail II source used in v0.36 — **1,067,371 real historical transaction rows** — but stops treating every run as a full rebuild. The source is canonicalised once into **25 immutable monthly Parquet partitions** with row counts, byte sizes and SHA-256 provenance. Durable state is committed after each successful metric partition.
+The UCI source is canonicalised into **25 immutable monthly Parquet partitions** with row counts and SHA-256 provenance. Durable state allows unchanged, interrupted and damaged runs to avoid irrelevant work while still reconciling to a clean rebuild.
 
-```text
-pinned UCI XLSX
-    ↓ one-time canonicalisation
-25 month-partitioned Parquet files + SHA-256 manifest
-    ↓
-partition state / derived-output hashes
-    ↓
-process only missing, revised or invalidated partitions
-    ↓
-exact reconciliation to clean full rebuild
-```
-
-| operational check | Validated result |
+| Operational check | Validated result |
 |---|---:|
 | Real source rows | **1,067,371** |
-| Canonical month partitions | **25** |
-| Canonical Parquet bytes | **9,806,373** |
-| Source workbook bytes | 45,622,278 |
-| Full vs incremental daily metrics | **exact match** |
+| Full vs incremental metrics | **exact match** |
 | Idempotent no-op source rows scanned | **0** |
-| Large source partitions re-hashed in normal no-op | **0** |
-| Durable rows reused after simulated restart | **257,045** |
 | Restart partitions skipped | **7** |
+| Durable rows reused after restart | **257,045** |
 | Targeted repair partition | `2010-12` |
 | Targeted repair source rows scanned | **65,004** |
 | Repair scan reduction vs full source | **93.91%** |
-| Repaired output hashes restored | **exact match** |
-| Explicit full source integrity audit | **25 / 25 SHA-verified** |
+| Repaired output hashes | **exact match** |
+| Full source integrity audit | **25 / 25 SHA-verified** |
 
-The main first-load bottleneck is XLSX decompression/XML parsing and canonical type normalisation, not the analytical DuckDB aggregation. Shared-runner timings are therefore diagnostic only. The stable performance contract is deterministic work avoided: a no-op scans **0 rows**, targeted `2010-12` repair scans **65,004 rows**, and restart after seven durable partitions scans **810,326 rows** instead of 1,067,371.
+The main first-load bottleneck is XLSX decompression/XML parsing and canonical type normalisation. Shared-runner timings remain diagnostic; stable performance claims use deterministic rows/partitions selected or scanned.
 
 See [`docs/INCREMENTAL_RECOVERY_PERFORMANCE.md`](docs/INCREMENTAL_RECOVERY_PERFORMANCE.md).
 
-## v0.36: real-world portability
+## v0.36: external real-world portability
 
-The external lane uses **UCI Online Retail II**, real historical transactions from a UK-based non-store online retailer covering 1 December 2009 to 9 December 2011 (DOI `10.24432/C5CG6D`, CC BY 4.0). The raw workbook is not committed. GitHub Actions downloads the official source, verifies pinned archive/workbook SHA-256 values, adapts both workbook sheets and independently rebuilds the evidence.
+The external lane uses **UCI Online Retail II**, public real historical transactions from a UK-based non-store online retailer (DOI `10.24432/C5CG6D`, CC BY 4.0). GitHub Actions downloads the official source, verifies pinned archive/workbook SHA-256 values and independently reconstructs the evidence.
 
-| real-data check | Validated result |
-|---|---:|
-| Source rows | **1,067,371** |
-| Calendar days | **739** |
-| Valid purchase-line rows | **1,041,670** |
-| Missing CustomerID rows | **243,007** |
-| Cancellation rows | **19,494** |
-| Exact duplicate rows excluding generated source-row ID | **12,133** |
-| Semantic replacements approved / withheld | **0 / 2** |
-| Frozen forecast metrics approved / withheld | **0 / 4** |
+Key observed facts include **1,067,371 source rows**, **739 calendar days**, **1,041,670 valid purchase-line rows**, **243,007 missing CustomerID rows**, **19,494 cancellation rows** and **12,133 exact duplicates** excluding the generated source-row ID.
 
-The real data exposed a portability bug not present in the synthetic generator: a date with valid anonymous purchases but no identifiable CustomerID produced `NaN` after the customer-count join. The implementation was fixed to represent **0 identifiable active customers** rather than weakening the test.
-
-Frozen forecast rules are not retuned after seeing the external data. `orders`, for example, has **15.31% WAPE** and substantially beats the last-value benchmark, but **20.94% MAPE** exceeds the pre-existing 20% limit, so it remains **WITHHOLD**.
-
-Two plausible semantic replacements are also withheld as silent drop-ins: signed transaction value shifts purchase revenue by **-8.04%**, and any-transaction customer population shifts the purchasing-customer population by **+1.09%** against the declared 1% compatibility tolerance.
+Real data is allowed to fail frozen rules. All four external forecast series are withheld under the pre-existing forecasting contract; `orders`, for example, has **15.31% WAPE** but **20.94% MAPE**, just above the frozen 20% gate. Two plausible metric replacements are also withheld as silent drop-ins because signed transaction value changes purchase revenue by **-8.04%** and the any-transaction customer population changes the purchasing-customer population by **+1.09%** against the declared 1% semantic tolerance.
 
 See [`docs/REAL_DATA_PORTABILITY.md`](docs/REAL_DATA_PORTABILITY.md).
 
-## Controlled evidence: reproduce hard decision boundaries
+## Controlled decision evidence
 
-Synthetic evidence is retained where the public real source lacks the fields needed for a controlled counterexample.
+Synthetic evidence is retained where the public source lacks the fields needed for controlled counterexamples.
 
-### Metric/producer contract evolution
+### Metric and producer evolution
 
-v0.35 separates producer compatibility, metric semantic safety and downstream decision stability.
+v0.35 performs a **450 product-day shadow replay**. An optional `country` field is approved, while a required `event_id → event_uuid` rename and a DAU semantic broadening are withheld. The semantic candidate changes aggregate DAU by up to **+4.94%** even though downstream forecast eligibility is unchanged, proving that stable downstream decisions do not compensate for a changed KPI definition.
 
-| Proposal | Class | Producer compatible | Metric invariant | Forecast stable | Action |
-|---|---|---:|---:|---:|---|
-| add optional `country` | ADDITIVE | PASS | PASS | PASS | **APPROVE** |
-| broaden DAU to any certified event | SEMANTIC | PASS | **FAIL** | PASS | **WITHHOLD** |
-| rename required `event_id` → `event_uuid` | BREAKING | **FAIL** | PASS | PASS | **WITHHOLD** |
+### Forecast decisioning
 
-The semantic case uses a **450 product-day shadow replay**. Aggregate DAU moves by +4.94%, +2.04% and +4.04% while all three downstream DAU forecast eligibility states remain unchanged. Stable downstream decisions do not compensate for a materially changed KPI definition.
+The controlled forecast reference evaluates four rolling origins × seven-day horizons. `photo_editor:dau` has only **3.92% WAPE**, but the simpler last-value benchmark has **2.56%**, so the candidate remains withheld. Forecast accuracy alone is not eligibility.
 
-See [`docs/CONTRACT_EVOLUTION_GOVERNANCE.md`](docs/CONTRACT_EVOLUTION_GOVERNANCE.md).
+### Experiment and impact decisioning
 
-### Forecast accuracy is not enough
+The 8,000-user pricing experiment estimates **+£0.6851/user/30d** with a positive 95% confidence interval, but its paid-conversion guardrail fails. The experiment remains **HOLD**; the hypothetical **£102,762** cohort revenue scenario remains counterfactual-only with **0 decision-authorised treated users**.
 
-The synthetic reference approves **2 / 9** forecast metrics. `photo_editor:dau` has only **3.92% WAPE**, but the last-value benchmark has **2.56%**, so the candidate is **WITHHOLD** despite low standalone error.
+### Freshness uncertainty
 
-See [`docs/FORECAST_DECISIONING.md`](docs/FORECAST_DECISIONING.md).
-
-### Positive revenue is not rollout authorisation
-
-The controlled 8,000-user pricing experiment estimates **+£0.6851/user/30d** with a positive 95% CI, but its paid-conversion guardrail fails. The experiment remains **HOLD**; a hypothetical **£102,762** cohort revenue impact remains counterfactual-only, with **0 decision-authorised treated users**.
-
-See [`docs/EXPERIMENT_DECISIONING.md`](docs/EXPERIMENT_DECISIONING.md) and [`docs/IMPACT_PLANNING.md`](docs/IMPACT_PLANNING.md).
-
-### Observed freshness is not statistical certification
-
-Synthetic processing-time evidence separates a 48h final-snapshot choice, a 96h candidate stable across nine rolling windows, and the stronger statement that **no candidate is certified at 95% family-wise confidence**. The public UCI source has no ingestion timestamp, so this evidence remains explicitly synthetic.
-
-See [`docs/WATERMARK_STABILITY.md`](docs/WATERMARK_STABILITY.md), [`docs/WATERMARK_UNCERTAINTY.md`](docs/WATERMARK_UNCERTAINTY.md) and [`docs/CERTIFICATION_EVIDENCE_PLANNING.md`](docs/CERTIFICATION_EVIDENCE_PLANNING.md).
+Controlled processing-time evidence distinguishes an observed stable watermark choice from statistical certification. A 96h candidate is stable across nine rolling windows, but **no candidate is certified at 95% family-wise confidence** under the declared model. The real UCI source has invoice/event time but no independent ingestion timestamp, so no real-data watermark/as-of claim is fabricated.
 
 ## Validation architecture
 
-Three independent CI lanes protect different evidence boundaries. The operational lane now also validates reporting and consumer-contract evolution.
+Three CI lanes protect distinct evidence boundaries:
 
 ```text
-controlled synthetic lane
-  pytest (99 repository tests)
-  → deterministic reference build
+controlled deterministic lane
+  pytest (101 repository tests)
+  → reference build
   → forecast / migration / watermark / uncertainty validators
   → experiment / impact validators
   → pinned and static claim validators
@@ -255,16 +209,17 @@ real-data portability lane
   → independent DuckDB/Python recomputation
   → checked-in real-data claim ledger
 
-incremental operational + reporting + contract lane
+operational consumer lane
   official pinned UCI download
-  → canonical 25-partition Parquet snapshot
-  → interruption / no-op / repair scenarios
-  → independent full-rebuild parity + source/output SHA audit
-  → bounded five-metric reporting interface
-  → partition pruning + tamper rejection + response reconciliation
-  → schema 1.0 default + explicit schema 1.1 negotiation
-  → independently recomputed compatibility classifications
-  → JSON 1.0 / JSON 1.1 / CSV consumer smoke tests
+  → 25-partition canonical store
+  → no-op / interruption / repair evidence
+  → bounded reporting + integrity-before-serve
+  → schema 1.0 default / explicit 1.1 negotiation
+  → request-local DuckDB execution
+  → serial vs 8-worker concurrent exact replay
+  → mixed invalid-consumer failure isolation
+  → independent workload recomputation
+  → deterministic workload claim ledger
 ```
 
 ## Reproduce
@@ -276,33 +231,43 @@ pip install -r requirements.txt
 pip install -e .
 
 make check             # controlled deterministic lane
-make real-check        # network-enabled UCI portability lane
-make incremental-check # network-enabled recovery/reporting/contract lane
+make real-check        # network-enabled external UCI lane
+make incremental-check # network-enabled recovery/reporting/contract/workload lane
+```
+
+A reporting query can be executed directly:
+
+```bash
+python scripts/query_retail_metrics.py \
+  --incremental-dir build/incremental-retail \
+  --start 2010-12-01 \
+  --end 2010-12-07 \
+  --metrics revenue_gbp,orders,active_customers \
+  --format json \
+  --schema-version 1.1
 ```
 
 ## Claim boundaries
 
-- UCI Online Retail II is public real-world historical transaction data; this repository is not a production deployment and does not claim access to a company's private systems.
-- `InvoiceDate` is event time, **not ingestion time**. Real-data late-arrival, watermark, processing-time SLA and point-in-time/as-of reconstruction are therefore not claimed.
-- The reporting layer is a local Python/CLI data-product boundary, not a deployed network service or production availability/latency claim.
-- The **96%** reporting figure is metric-partition-selection reduction for the pinned seven-day query, not source-row reduction and not a latency speedup.
-- Schema 1.1 being additive does not imply universal parser compatibility; strict existing consumers retain explicit schema 1.0 negotiation.
-- No production consumer-support lifetime or deprecation schedule is claimed.
-- The 1% metric semantic tolerance is a declared workbench governance threshold, not a universal industry threshold.
-- Forecast thresholds were frozen before external evaluation; failed real-data gates are reported rather than tuned away.
-- Shared GitHub-runner timings are diagnostic only. Public performance claims use deterministic rows/partitions selected or scanned and exact parity.
-- Operational evidence is single-node DuckDB/Parquet; it does not claim distributed-system, object-store or production-network benchmarks.
+- UCI Online Retail II is public real-world historical data; this repository is not a production deployment and does not claim access to private company systems.
+- `InvoiceDate` is event time, not ingestion time. Real-data late-arrival, watermark, processing-time SLA and point-in-time/as-of reconstruction are not claimed.
+- The reporting layer is a local Python/CLI data-product boundary, not a deployed network service.
+- Schema 1.1 being additive does not imply universal parser compatibility; schema 1.0 remains available through explicit negotiation.
+- v0.40 proves request-local query execution and deterministic concurrent replay on one process / one node; it does not prove production QPS, tail latency, distributed isolation, fairness or capacity.
+- The 96% reporting figure is metric-partition-selection reduction for one pinned query, not source-row reduction or latency speedup.
+- The 1% semantic tolerance is a declared workbench governance threshold, not a universal industry threshold.
+- Forecast thresholds were frozen before external evaluation; failed gates are reported rather than retuned away.
+- Shared GitHub-runner timings are diagnostic only. Public operational claims use deterministic rows/partitions/hashes and exact parity.
 
 The progression is:
 
 ```text
 trust the source
-→ define the metric explicitly
-→ preserve point-in-time semantics where the source supports them
+→ define metrics explicitly
 → test decisions without leakage
 → validate on external real data
-→ update incrementally without losing reproducibility
-→ recover and repair without silently changing the answer
-→ expose validated metrics through a bounded consumer contract
-→ evolve that contract without silently migrating existing consumers
+→ update incrementally and recover exactly
+→ expose a bounded reporting product
+→ evolve its consumer contract without silent migration
+→ isolate concurrent consumers without changing the answer
 ```
