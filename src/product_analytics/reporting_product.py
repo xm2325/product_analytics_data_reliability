@@ -154,9 +154,14 @@ class RetailMetricStore:
             raise ReportingContractError("reporting store has no partitions")
 
         self.partition_keys = tuple(sorted(source_keys))
+        first_key = self.partition_keys[0]
+        last_key = self.partition_keys[-1]
+        self._validate_selected_partition(first_key)
+        if last_key != first_key:
+            self._validate_selected_partition(last_key)
         self._con = duckdb.connect()
-        first_path = self._metric_path(self.partition_keys[0])
-        last_path = self._metric_path(self.partition_keys[-1])
+        first_path = self._metric_path(first_key)
+        last_path = self._metric_path(last_key)
         bounds = self._con.execute(
             "SELECT MIN(date), MAX(date) FROM read_parquet(?)",
             [[str(first_path), str(last_path)]],
