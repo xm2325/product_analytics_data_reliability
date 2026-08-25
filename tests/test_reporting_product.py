@@ -8,6 +8,10 @@ import duckdb
 import pandas as pd
 import pytest
 
+from product_analytics.consumer_contract_evolution import (
+    DEFAULT_RESPONSE_SCHEMA_VERSION,
+    LATEST_RESPONSE_SCHEMA_VERSION,
+)
 from product_analytics.reporting_product import (
     MAX_QUERY_DAYS,
     MetricQuery,
@@ -129,3 +133,30 @@ def test_boundary_partition_tampering_is_rejected_before_duckdb_read(tmp_path: P
         handle.write(b"tamper")
     with pytest.raises(ReportingContractError, match="metric SHA"):
         RetailMetricStore(metric_dir, state, manifest)
+
+
+def test_schema_1_0_remains_default_and_1_1_is_explicit_opt_in(tmp_path: Path) -> None:
+    metric_dir, state, manifest = _fixture(tmp_path)
+    query = MetricQuery(date(2011, 2, 1), date(2011, 2, 3), ("orders", "revenue_gbp"))
+    with RetailMetricStore(metric_dir, state, manifest) as store:
+        v1_0, work_1_0 = store.query(query)
+        v1_1, work_1_1 = store.query(query, schema_version=LATEST_RESPONSE_SCHEMA_VERSION)
+
+    assert v1_0["schema_version"] == DEFAULT_RESPONSE_SCHEMA_VERSION == "1.0"
+    assert "contract" not in v1_0
+    assert v1_1["schema_version"] == LATEST_RESPONSE_SCHEMA_VERSION == "1.1"
+    assert v1_1["contract"]["backward_compatible_via_negotiation"] == ["1.0"]
+    assert v1_0["query"] == v1_1["query"]
+    assert v1_0["data"] == v1_1["data"]
+    assert v1_0["response_sha256"] == v1_1["response_sha256"]
+    assert work_1_0 == work_1_1
+
+
+def test_unsupported_schema_version_is_rejected_before_query_execution(tmp_path: Path) -> None:
+    metric_dir, state, manifest = _fixture(tmp_path)
+    with RetailMetricStore(metric_dir, state, manifest) as store:
+        with pytest.raises(ReportingContractError, match="unsupported reporting schema"):
+            store.query(
+                MetricQuery(date(2011, 2, 1), date(2011, 2, 1), ("orders",)),
+                schema_version="2.0",
+            )
