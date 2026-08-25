@@ -1,16 +1,20 @@
 # Product Analytics & Data Reliability Workbench
 
-**Version:** v0.40  
+**Version:** v0.41  
 **Stack:** Python · DuckDB · SQL · Pandas · NumPy · SciPy · Statsmodels · Parquet · Pytest · GitHub Actions
 
-A reproducible analytics workbench for deciding when data, metrics, forecasts and experiments are trustworthy enough to support a business decision — and for exposing validated metrics through a bounded consumer interface that remains reproducible as data, contracts and concurrent consumers evolve.
+A reproducible analytics workbench for deciding when data, metrics, forecasts and experiments are trustworthy enough to support a business decision — and for keeping those decisions trustworthy when upstream data, metric definitions, consumer contracts and concurrent workloads evolve.
 
-The repository has six complementary evidence layers:
+The repository now has seven complementary evidence layers:
 
 ```text
 controlled synthetic evidence
     -> failure injection, point-in-time correctness, metric migration,
        forecasting, experiment guardrails and decision boundaries
+
+selective evidence invalidation
+    -> governed dependency fingerprints, lineage-aware stale propagation,
+       fail-closed downstream actions and false-positive avoidance
 
 public real-world evidence
     -> external schema adaptation, source quality, metric semantics,
@@ -18,7 +22,7 @@ public real-world evidence
 
 real-world operational evidence
     -> immutable partitions, incremental processing, idempotency,
-       interruption recovery, targeted repair and work diagnosis
+       interruption recovery, targeted repair and deterministic work diagnosis
 
 consumer data-product evidence
     -> bounded historical queries, metric catalogue, zero-fill,
@@ -33,17 +37,72 @@ multi-consumer execution evidence
        deterministic work accounting and failure isolation
 ```
 
-The design principle is unchanged: **a calculation is not trustworthy merely because it ran successfully, and an interface is not safely scalable merely because it serves one correct request.**
+The design principle is: **a result is not trustworthy merely because it was correct when first computed. It must still be supported by the same governed evidence assumptions when someone acts on it.**
 
-## v0.40 headline: concurrent consumers must not change the answer
+## v0.41 headline: upstream changes must invalidate only the evidence they actually break
 
-v0.40 keeps the v0.39 response schemas and metric semantics unchanged, but strengthens the execution boundary. The reporting store no longer reuses one mutable DuckDB connection across consumer queries. Immutable manifest/state metadata are shared; **every query creates and closes its own ephemeral DuckDB connection**.
+v0.35 already classified additive, breaking and semantic migrations. It also showed a subtle case: broadening DAU from `app_open` to any certified event changed aggregate DAU by up to **+4.94%**, yet the three downstream DAU forecast eligibility states happened to remain unchanged.
 
-The real reference workload runs on the same pinned **1,067,371-row UCI Online Retail II** source and 25-partition metric store used by v0.37–v0.39.
+That is not enough to keep the old forecasts trustworthy.
+
+v0.41 adds an explicit **16-node evidence dependency DAG**. Each governed dependency surface receives a deterministic SHA-256 fingerprint. A stored result becomes stale when either:
+
+1. its own governed fingerprint changes; or
+2. any dependency it was built from is stale.
+
+Stale evidence fails closed as `WITHHOLD_STALE`. The original business action is preserved separately, so evidence freshness cannot accidentally rewrite a `HOLD`, `WITHHOLD` or `APPROVE` conclusion.
+
+### Scoped fingerprints, not one global contract hash
+
+Hashing the entire event contract would create noisy false positives. For example, adding an unused optional `country` field changes the JSON document but should not invalidate forecasts that do not use that field.
+
+v0.41 therefore fingerprints four governed root surfaces:
+
+- producer shape: grain, required columns and processing-time obligations;
+- DAU semantics: activity event and active-use rule;
+- revenue semantics: value and revenue-scope rules;
+- paid-subscription semantics: subscription-event surface.
+
+The controlled scenarios reuse the existing v0.35 migration proposals:
+
+| Change | Existing migration action | Fresh | Direct stale | Downstream stale | Total stale | Pricing chain fresh |
+|---|---|---:|---:|---:|---:|---|
+| add optional `country` | **APPROVE** | 16 | 0 | 0 | 0 | yes |
+| broaden DAU to any certified event | **WITHHOLD** | 8 | 1 | 7 | 8 | yes |
+| rename required `event_id` → `event_uuid` | **WITHHOLD** | 3 | 1 | 12 | 13 | no |
+
+The most important case is the DAU semantic change:
+
+```text
+semantic:dau                 DIRECT_STALE
+    ↓
+metric:dau                   DOWNSTREAM_STALE
+    ↓
+3 DAU forecasts              DOWNSTREAM_STALE
+    ↓
+3 DAU planning decisions     DOWNSTREAM_STALE
+```
+
+The pricing experiment, impact scenario and rollout authorisation remain fresh because they depend on revenue and paid-subscription semantics, not DAU. Their baseline actions remain `HOLD`, `COUNTERFACTUAL_ONLY` and `WITHHOLD`.
+
+So v0.41 demonstrates both sides of correct invalidation:
+
+- **do invalidate** evidence whose semantic assumptions changed, even if its old numeric decision happened to stay the same;
+- **do not invalidate** unrelated evidence merely because some global contract document changed.
+
+The independent validator reconstructs the DAG, fingerprints and propagation logic without importing the production invalidation module.
+
+See [`docs/EVIDENCE_INVALIDATION.md`](docs/EVIDENCE_INVALIDATION.md).
+
+## v0.40: concurrent consumers must not change the answer
+
+v0.40 keeps the v0.39 response schemas and metric semantics unchanged but strengthens the execution boundary. Immutable manifest/state metadata are shared; **every query creates and closes its own request-local DuckDB connection**.
+
+The real reference workload runs on the pinned **1,067,371-row UCI Online Retail II** source and 25-partition metric store.
 
 | v0.40 workload-isolation check | Validated result |
 |---|---:|
-| Data-product version | **0.40.0** |
+| Reporting data-product version | **0.40.0** |
 | Default / latest JSON schema | **1.0 / 1.1** |
 | Valid requests / consumers | **12 / 12** |
 | Concurrent workers | **8** |
@@ -60,9 +119,6 @@ The real reference workload runs on the same pinned **1,067,371-row UCI Online R
 | Healthy results preserved after failure batch | **PASS** |
 | Parallel consumers on the same hot window | **6** |
 | Unique full-payload hashes across those six | **1** |
-| Matched schema 1.0/1.1 core response hash | **exact parity** |
-| Operational focused tests | **17 passed** |
-| Full repository tests | **101 passed** |
 
 The deterministic workload fingerprint is:
 
@@ -70,50 +126,17 @@ The deterministic workload fingerprint is:
 ef1adcc2dc091ad9ad00c16175ea7b38c8f6fec084c4c1700c6c50c127376e7e
 ```
 
-### Why not put a lock around one shared connection?
+The six repeated hot-window consumers read the same declared data, return one identical full-payload hash and do not share mutable query-engine state. Three deliberately invalid consumers — unknown metric, unsupported schema `2.0`, duplicate metric — fail through `ReportingContractError` without changing any healthy result in the same concurrent batch or in a later healthy replay.
 
-A lock would make one mutable query engine safe by serialising access, but it would not create a clean consumer-isolation boundary. v0.40 instead keeps the store metadata immutable and request-independent while moving DuckDB query execution into request-local connections:
-
-```text
-canonical manifest + durable state + metric partitions
-                      ↓
-               immutable store
-                      ↓
-        ┌─────────────┼─────────────┐
-        ↓             ↓             ↓
-   consumer A     consumer B     consumer C
-   DuckDB conn    DuckDB conn    DuckDB conn
-        ↓             ↓             ↓
-      close          close          close
-```
-
-The six repeated hot-window consumers therefore read the same declared data, return one identical full-payload hash and do not share query-engine state.
-
-### A bad consumer must not poison healthy consumers
-
-The mixed 15-request workload adds three deliberately invalid requests to the 12 valid requests:
-
-- unknown metric;
-- unsupported schema `2.0`;
-- duplicate metric name.
-
-All three fail through `ReportingContractError`. Every healthy request in the same concurrent batch remains exactly equal to its serial baseline, including response payload hash, query/data response SHA, selected partitions and returned rows. Replaying all healthy requests after the failure batch also reproduces the same baseline.
-
-The independent validator does not import the workload harness. It constructs its own serial and threaded replays, reconciles successful responses back to `incremental_daily_metrics.csv`, recomputes response hashes, recomputes work accounting and verifies the exact failure set.
-
-### Performance claim boundary
-
-v0.40 deliberately has **no QPS, latency, throughput or speedup gate**. Shared GitHub runners are unsuitable evidence for a stable capacity claim. The public contract is result isolation plus deterministic work accounting: 12 valid requests selected 27 metric partitions in aggregate, returned 652 rows and produced the same workload digest under serial and 8-worker concurrent execution.
-
-This remains a **single-node DuckDB/Parquet reference**, not a deployed network service, distributed database, tenant-quota system or production concurrency SLA.
+v0.40 deliberately has **no QPS, latency, throughput or speedup gate**. Shared GitHub runners are unsuitable evidence for a stable capacity claim. The public claim is deterministic result isolation and work accounting on one process / one node, not a distributed-service SLA.
 
 See [`docs/WORKLOAD_ISOLATION.md`](docs/WORKLOAD_ISOLATION.md).
 
 ## v0.39: evolve the interface without silently migrating consumers
 
-v0.39 separates the data-product release version from the consumer response schema. Existing/unversioned JSON consumers remain on schema **1.0**; schema **1.1** is explicit opt-in and adds only a top-level `contract` metadata object.
+The data-product release version is separated from the consumer response schema. Existing/unversioned JSON consumers remain on schema **1.0**; schema **1.1** is explicit opt-in and adds only a top-level `contract` metadata object.
 
-The same seven-day real-data query under schemas 1.0 and 1.1 preserves the query payload, metric rows, query/data response SHA and deterministic partition work exactly. Three governed migration proposals demonstrate one additive **APPROVE** and two breaking **WITHHOLD** decisions:
+The same seven-day real-data query under schemas 1.0 and 1.1 preserves query payload, metric rows, response SHA and deterministic partition work exactly.
 
 | Proposal | Classification | Decision |
 |---|---|---|
@@ -121,7 +144,7 @@ The same seven-day real-data query under schemas 1.0 and 1.1 preserves the query
 | rename `row_count` → `rows` | BREAKING | **WITHHOLD** |
 | change `orders` integer → float | BREAKING | **WITHHOLD** |
 
-Additive does not mean every possible parser accepts unknown fields; a strict existing consumer can continue requesting schema 1.0. No production support-lifetime or deprecation SLA is claimed.
+Additive does not imply universal parser compatibility; strict existing consumers can stay on schema 1.0.
 
 See [`docs/CONSUMER_CONTRACT_EVOLUTION.md`](docs/CONSUMER_CONTRACT_EVOLUTION.md).
 
@@ -135,11 +158,13 @@ Five allowlisted daily metrics are exposed through a framework-independent Pytho
 - `purchase_lines`
 - `active_customers`
 
-The reporting store covers **2009-12-01 through 2011-12-09**, limits a request to **366 days**, zero-fills missing calendar days and SHA-verifies selected metric partitions before serving them. The pinned seven-day query selects **1 of 25** monthly metric partitions for metric values — a **96% partition-selection reduction**, not a latency claim — and exactly reconciles to the validated daily layer. A cross-month query selects exactly two partitions; unknown, over-wide and tampered requests fail closed.
+The reporting store covers **2009-12-01 through 2011-12-09**, limits a request to **366 days**, zero-fills missing calendar days and SHA-verifies selected metric partitions before serving them.
+
+The pinned seven-day query selects **1 of 25** monthly metric partitions for metric values — a **96% partition-selection reduction**, not a latency claim — and exactly reconciles to the validated daily layer. Unknown, over-wide and tampered requests fail closed.
 
 See [`docs/REPORTING_DATA_PRODUCT.md`](docs/REPORTING_DATA_PRODUCT.md).
 
-## v0.37: incremental recovery and deterministic work reduction
+## v0.37: incremental recovery and targeted repair
 
 The UCI source is canonicalised into **25 immutable monthly Parquet partitions** with row counts and SHA-256 provenance. Durable state allows unchanged, interrupted and damaged runs to avoid irrelevant work while still reconciling to a clean rebuild.
 
@@ -156,17 +181,17 @@ The UCI source is canonicalised into **25 immutable monthly Parquet partitions**
 | Repaired output hashes | **exact match** |
 | Full source integrity audit | **25 / 25 SHA-verified** |
 
-The main first-load bottleneck is XLSX decompression/XML parsing and canonical type normalisation. Shared-runner timings remain diagnostic; stable performance claims use deterministic rows/partitions selected or scanned.
+Shared-runner timings remain diagnostic; public performance evidence uses deterministic rows, partitions, hashes and exact parity.
 
 See [`docs/INCREMENTAL_RECOVERY_PERFORMANCE.md`](docs/INCREMENTAL_RECOVERY_PERFORMANCE.md).
 
 ## v0.36: external real-world portability
 
-The external lane uses **UCI Online Retail II**, public real historical transactions from a UK-based non-store online retailer (DOI `10.24432/C5CG6D`, CC BY 4.0). GitHub Actions downloads the official source, verifies pinned archive/workbook SHA-256 values and independently reconstructs the evidence.
+The external lane uses **UCI Online Retail II**, public real historical transactions from a UK-based non-store online retailer (DOI `10.24432/C5CG6D`, CC BY 4.0). GitHub Actions downloads the official source and verifies pinned archive/workbook SHA-256 values.
 
-Key observed facts include **1,067,371 source rows**, **739 calendar days**, **1,041,670 valid purchase-line rows**, **243,007 missing CustomerID rows**, **19,494 cancellation rows** and **12,133 exact duplicates** excluding the generated source-row ID.
+Observed source facts include **1,067,371 rows**, **739 calendar days**, **1,041,670 valid purchase-line rows**, **243,007 missing CustomerID rows**, **19,494 cancellation rows** and **12,133 exact duplicates** excluding the generated source-row ID.
 
-Real data is allowed to fail frozen rules. All four external forecast series are withheld under the pre-existing forecasting contract; `orders`, for example, has **15.31% WAPE** but **20.94% MAPE**, just above the frozen 20% gate. Two plausible metric replacements are also withheld as silent drop-ins because signed transaction value changes purchase revenue by **-8.04%** and the any-transaction customer population changes the purchasing-customer population by **+1.09%** against the declared 1% semantic tolerance.
+Real data is allowed to fail frozen rules. All four external forecast series are withheld under the pre-existing forecasting contract. `orders`, for example, has **15.31% WAPE** but **20.94% MAPE**, just above the frozen 20% gate. Two plausible metric replacements are also withheld as silent drop-ins because signed transaction value changes purchase revenue by **-8.04%** and the any-transaction customer population changes the purchasing-customer population by **+1.09%** against the declared 1% compatibility tolerance.
 
 See [`docs/REAL_DATA_PORTABILITY.md`](docs/REAL_DATA_PORTABILITY.md).
 
@@ -174,33 +199,40 @@ See [`docs/REAL_DATA_PORTABILITY.md`](docs/REAL_DATA_PORTABILITY.md).
 
 Synthetic evidence is retained where the public source lacks the fields needed for controlled counterexamples.
 
-### Metric and producer evolution
+### Metric and producer evolution — v0.35
 
-v0.35 performs a **450 product-day shadow replay**. An optional `country` field is approved, while a required `event_id → event_uuid` rename and a DAU semantic broadening are withheld. The semantic candidate changes aggregate DAU by up to **+4.94%** even though downstream forecast eligibility is unchanged, proving that stable downstream decisions do not compensate for a changed KPI definition.
+A **450 product-day shadow replay** evaluates three migration proposals. Optional `country` is approved; required `event_id → event_uuid` and DAU semantic broadening are withheld. The semantic candidate changes aggregate DAU by up to **+4.94%** even though downstream forecast eligibility happens not to change.
 
-### Forecast decisioning
+### Forecast decisioning — v0.34
 
-The controlled forecast reference evaluates four rolling origins × seven-day horizons. `photo_editor:dau` has only **3.92% WAPE**, but the simpler last-value benchmark has **2.56%**, so the candidate remains withheld. Forecast accuracy alone is not eligibility.
+The controlled forecast reference evaluates four rolling origins × seven-day horizons. `photo_editor:dau` has only **3.92% WAPE**, but the simpler last-value benchmark has **2.56%**, so the candidate remains withheld. Low absolute error is not sufficient if a trivial benchmark is better.
 
-### Experiment and impact decisioning
+### Experiment and impact decisioning — v0.32–v0.33
 
-The 8,000-user pricing experiment estimates **+£0.6851/user/30d** with a positive 95% confidence interval, but its paid-conversion guardrail fails. The experiment remains **HOLD**; the hypothetical **£102,762** cohort revenue scenario remains counterfactual-only with **0 decision-authorised treated users**.
+The deterministic 8,000-user pricing experiment estimates **+£0.6851/user/30d** with a positive 95% confidence interval, but its paid-conversion guardrail fails. The experiment remains **HOLD**.
+
+The hypothetical cohort plan treats **150,000** users and implies about **£102,762** counterfactual 30-day incremental revenue, but because the experiment is still HOLD, decision-authorised treated users remain **0** and authorised incremental revenue remains null.
 
 ### Freshness uncertainty
 
-Controlled processing-time evidence distinguishes an observed stable watermark choice from statistical certification. A 96h candidate is stable across nine rolling windows, but **no candidate is certified at 95% family-wise confidence** under the declared model. The real UCI source has invoice/event time but no independent ingestion timestamp, so no real-data watermark/as-of claim is fabricated.
+Controlled processing-time evidence distinguishes observed stability from statistical certification. A 96h candidate is stable across nine rolling windows, but **no candidate is certified at 95% family-wise confidence** under the declared model.
+
+The real UCI source has invoice/event time but no independent ingestion timestamp, so the repository does not fabricate a real-data watermark/as-of claim.
 
 ## Validation architecture
 
-Three CI lanes protect distinct evidence boundaries:
+The repository keeps historical evidence boundaries explicit rather than rewriting old bundles when a later release adds a new concern.
 
 ```text
 controlled deterministic lane
-  pytest (101 repository tests)
-  → reference build
-  → forecast / migration / watermark / uncertainty validators
+  full pytest suite
+  → frozen v0.35 reference build
+  → forecast / migration validators
+  → v0.41 dependency-graph build
+  → independent v0.41 stale-propagation validator
+  → watermark / uncertainty / evidence-plan validators
   → experiment / impact validators
-  → pinned and static claim validators
+  → frozen v0.35 pinned/static claim validators
 
 real-data portability lane
   official pinned UCI download
@@ -230,9 +262,17 @@ source .venv/bin/activate
 pip install -r requirements.txt
 pip install -e .
 
-make check             # controlled deterministic lane
+make check             # controlled reference + v0.41 invalidation validation
 make real-check        # network-enabled external UCI lane
 make incremental-check # network-enabled recovery/reporting/contract/workload lane
+```
+
+The v0.41 evidence layer can also be run directly after building the controlled reference:
+
+```bash
+make reference
+make invalidation-reference
+make invalidation-validate
 ```
 
 A reporting query can be executed directly:
@@ -251,6 +291,8 @@ python scripts/query_retail_metrics.py \
 
 - UCI Online Retail II is public real-world historical data; this repository is not a production deployment and does not claim access to private company systems.
 - `InvoiceDate` is event time, not ingestion time. Real-data late-arrival, watermark, processing-time SLA and point-in-time/as-of reconstruction are not claimed.
+- v0.41 is controlled dependency-invalidation evidence over a declared 16-node graph; it is not a production lineage catalogue, scheduler or distributed invalidation system.
+- v0.41 deliberately separates package/repository version **0.41.0** from the unchanged reporting data-product version **0.40.0** and unchanged response schemas **1.0 / 1.1**.
 - The reporting layer is a local Python/CLI data-product boundary, not a deployed network service.
 - Schema 1.1 being additive does not imply universal parser compatibility; schema 1.0 remains available through explicit negotiation.
 - v0.40 proves request-local query execution and deterministic concurrent replay on one process / one node; it does not prove production QPS, tail latency, distributed isolation, fairness or capacity.
@@ -265,6 +307,8 @@ The progression is:
 trust the source
 → define metrics explicitly
 → test decisions without leakage
+→ govern schema and metric changes
+→ invalidate stale downstream evidence selectively
 → validate on external real data
 → update incrementally and recover exactly
 → expose a bounded reporting product
