@@ -1,4 +1,4 @@
-.PHONY: install reference validate validate-forecast validate-migration validate-watermark validate-uncertainty validate-evidence validate-experiment validate-impact validate-reference validate-static-claims real-reference real-validate real-static-claims real-check incremental-reference incremental-validate incremental-static-claims reporting-reference reporting-validate consumer-contract-reference consumer-contract-validate workload-reference workload-validate workload-static-claims incremental-check test check clean
+.PHONY: install reference validate validate-forecast validate-migration invalidation-reference invalidation-validate validate-watermark validate-uncertainty validate-evidence validate-experiment validate-impact validate-reference validate-static-claims real-reference real-validate real-static-claims real-check incremental-reference incremental-validate incremental-static-claims reporting-reference reporting-validate consumer-contract-reference consumer-contract-validate workload-reference workload-validate workload-static-claims incremental-check test check clean
 
 install:
 	python -m pip install -r requirements.txt
@@ -15,6 +15,12 @@ validate-forecast:
 
 validate-migration:
 	python scripts/validate_contract_migration.py build/reference
+
+invalidation-reference:
+	python scripts/build_evidence_invalidation_reference.py --base-dir build/reference --output-dir build/evidence-invalidation
+
+invalidation-validate:
+	python scripts/validate_evidence_invalidation_reference.py --base-dir build/reference --output-dir build/evidence-invalidation
 
 validate-watermark:
 	python scripts/validate_watermark_backtest.py build/reference
@@ -83,7 +89,7 @@ incremental-check: incremental-reference incremental-validate incremental-static
 test:
 	pytest -q
 
-check: test reference validate validate-forecast validate-migration validate-watermark validate-uncertainty validate-evidence validate-experiment validate-impact validate-reference validate-static-claims
+check: test reference validate validate-forecast validate-migration invalidation-reference invalidation-validate validate-watermark validate-uncertainty validate-evidence validate-experiment validate-impact validate-reference validate-static-claims
 
 clean:
 	rm -rf build .pytest_cache
