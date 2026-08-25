@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.40.0
+
+- replaced the v0.39 reporting store's persistent shared DuckDB query connection with **request-local ephemeral DuckDB connections**, keeping source manifest and durable partition state immutable/shared while isolating mutable query-execution state per consumer;
+- retained the public consumer contract unchanged: schema **1.0 remains the default**, schema **1.1 remains explicit opt-in**, and v0.40 is a data-product execution upgrade rather than a silent response-schema migration;
+- added a deterministic **12-request / 12-consumer** real-data workload over the pinned 1,067,371-row UCI Online Retail II incremental store, mixing one-month, cross-month, year-scale, multi-metric and schema 1.0/1.1 requests;
+- compared the serial baseline with an **8-worker concurrent replay** and required exact per-request compact-result parity plus an identical workload SHA-256 fingerprint `ef1adcc2dc091ad9ad00c16175ea7b38c8f6fec084c4c1700c6c50c127376e7e`;
+- pinned deterministic work for that workload at **27 aggregate metric partitions selected / 27 selected metric files SHA-verified / 652 response rows / 16 unique partitions touched**;
+- added six parallel consumers of the same hot December 2010 query and observed **one unique full-payload hash**, demonstrating that interleaved execution does not change the returned payload;
+- added a **15-request mixed failure workload** by injecting unknown-metric, unsupported-schema and duplicate-metric consumers; all **3/3** invalid requests fail through `ReportingContractError` while every healthy result remains identical to its serial baseline;
+- required a second healthy serial replay after the mixed failure batch, proving that failed consumers do not leave shared query state that changes subsequent answers;
+- added `workload_isolation.py`, `build_workload_isolation_reference.py`, real workload request/result/evidence artefacts, and `tests/test_workload_isolation.py`;
+- added `validate_workload_isolation_reference.py`, which does **not** import the workload harness: it independently runs serial/threaded replays, reconciles successful responses to `incremental_daily_metrics.csv`, recomputes response hashes and work accounting, and checks the exact failure set;
+- added `results/workload_isolation_reference_summary.csv` and `validate_workload_static_claims.py`, deliberately refusing checked-in `seconds`, `latency`, `qps`, `throughput` or `speedup` claims from shared GitHub runners;
+- kept the claim boundary explicit: this is deterministic single-node DuckDB/Parquet consumer isolation evidence, not a network-service throughput SLA, distributed-database isolation claim, tenant-fairness proof or capacity benchmark;
+- let CI catch and repair one validator-quality regression during development: the first v0.40 reporting validator matched an explanatory sentence too literally; it now checks the actual structural isolation promises without weakening any execution or parity gate;
+- advanced package/runtime/reporting metadata to **0.40.0**, advanced the focused operational suite from **15 to 17 tests**, and advanced the full repository suite from **99 to 101 tests**, while the prior controlled, real-data, incremental, reporting and contract-evolution validators remain green.
+
 ## v0.39.0
 
 - added **governed consumer-contract evolution** over the v0.38 reporting data product, keeping the data-product release version separate from the public response-schema version;

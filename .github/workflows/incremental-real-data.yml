@@ -2,7 +2,7 @@ name: incremental-real-data
 
 on:
   push:
-    branches: [main, v0.37-incremental-recovery, v0.38-reporting-data-product, v0.39-consumer-contract-evolution]
+    branches: [main, v0.37-incremental-recovery, v0.38-reporting-data-product, v0.39-consumer-contract-evolution, v0.40-workload-isolation]
     paths:
       - '.github/workflows/incremental-real-data.yml'
       - 'README.md'
@@ -11,27 +11,34 @@ on:
       - 'docs/INCREMENTAL_RECOVERY_PERFORMANCE.md'
       - 'docs/REPORTING_DATA_PRODUCT.md'
       - 'docs/CONSUMER_CONTRACT_EVOLUTION.md'
+      - 'docs/WORKLOAD_ISOLATION.md'
       - 'requirements.txt'
       - 'pyproject.toml'
       - 'results/incremental_reference_summary.csv'
       - 'results/reporting_reference_summary.csv'
       - 'results/consumer_contract_reference_summary.csv'
+      - 'results/workload_isolation_reference_summary.csv'
       - 'src/product_analytics/incremental_retail.py'
       - 'src/product_analytics/reporting_product.py'
       - 'src/product_analytics/consumer_contract_evolution.py'
+      - 'src/product_analytics/workload_isolation.py'
       - 'src/product_analytics/real_retail.py'
       - 'src/product_analytics/real_source_contract.py'
       - 'scripts/build_incremental_retail_reference.py'
       - 'scripts/build_reporting_product_reference.py'
       - 'scripts/build_consumer_contract_reference.py'
+      - 'scripts/build_workload_isolation_reference.py'
       - 'scripts/query_retail_metrics.py'
       - 'scripts/validate_incremental_retail_reference.py'
       - 'scripts/validate_incremental_static_claims.py'
       - 'scripts/validate_reporting_product_reference.py'
       - 'scripts/validate_consumer_contract_reference.py'
+      - 'scripts/validate_workload_isolation_reference.py'
+      - 'scripts/validate_workload_static_claims.py'
       - 'tests/test_incremental_retail.py'
       - 'tests/test_reporting_product.py'
       - 'tests/test_consumer_contract_evolution.py'
+      - 'tests/test_workload_isolation.py'
   pull_request:
     paths:
       - '.github/workflows/incremental-real-data.yml'
@@ -41,27 +48,34 @@ on:
       - 'docs/INCREMENTAL_RECOVERY_PERFORMANCE.md'
       - 'docs/REPORTING_DATA_PRODUCT.md'
       - 'docs/CONSUMER_CONTRACT_EVOLUTION.md'
+      - 'docs/WORKLOAD_ISOLATION.md'
       - 'requirements.txt'
       - 'pyproject.toml'
       - 'results/incremental_reference_summary.csv'
       - 'results/reporting_reference_summary.csv'
       - 'results/consumer_contract_reference_summary.csv'
+      - 'results/workload_isolation_reference_summary.csv'
       - 'src/product_analytics/incremental_retail.py'
       - 'src/product_analytics/reporting_product.py'
       - 'src/product_analytics/consumer_contract_evolution.py'
+      - 'src/product_analytics/workload_isolation.py'
       - 'src/product_analytics/real_retail.py'
       - 'src/product_analytics/real_source_contract.py'
       - 'scripts/build_incremental_retail_reference.py'
       - 'scripts/build_reporting_product_reference.py'
       - 'scripts/build_consumer_contract_reference.py'
+      - 'scripts/build_workload_isolation_reference.py'
       - 'scripts/query_retail_metrics.py'
       - 'scripts/validate_incremental_retail_reference.py'
       - 'scripts/validate_incremental_static_claims.py'
       - 'scripts/validate_reporting_product_reference.py'
       - 'scripts/validate_consumer_contract_reference.py'
+      - 'scripts/validate_workload_isolation_reference.py'
+      - 'scripts/validate_workload_static_claims.py'
       - 'tests/test_incremental_retail.py'
       - 'tests/test_reporting_product.py'
       - 'tests/test_consumer_contract_evolution.py'
+      - 'tests/test_workload_isolation.py'
 
 jobs:
   uci-incremental-recovery:
@@ -78,8 +92,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install -e .
-      - name: Incremental, reporting and consumer-contract unit tests
-        run: pytest -q tests/test_incremental_retail.py tests/test_reporting_product.py tests/test_consumer_contract_evolution.py
+      - name: Incremental, reporting, consumer-contract and workload unit tests
+        run: pytest -q tests/test_incremental_retail.py tests/test_reporting_product.py tests/test_consumer_contract_evolution.py tests/test_workload_isolation.py
       - name: Build real incremental and recovery evidence
         run: python scripts/build_incremental_retail_reference.py --output-dir build/incremental-retail
       - name: Independently validate incremental evidence
@@ -94,6 +108,13 @@ jobs:
         run: python scripts/build_consumer_contract_reference.py --incremental-dir build/incremental-retail
       - name: Independently validate consumer-contract evolution
         run: python scripts/validate_consumer_contract_reference.py build/incremental-retail
+      - name: Build multi-consumer workload-isolation evidence
+        run: python scripts/build_workload_isolation_reference.py --incremental-dir build/incremental-retail
+      - name: Independently validate multi-consumer isolation
+        run: python scripts/validate_workload_isolation_reference.py build/incremental-retail
+      - name: Validate checked-in workload-isolation claims
+        if: ${{ hashFiles('results/workload_isolation_reference_summary.csv') != '' }}
+        run: python scripts/validate_workload_static_claims.py build/incremental-retail
       - name: Smoke-test default, negotiated and CSV consumer interfaces
         run: |
           python scripts/query_retail_metrics.py --incremental-dir build/incremental-retail --start 2010-12-01 --end 2010-12-07 --metrics revenue_gbp,orders,active_customers --format json > /tmp/report-v1.0.json
@@ -106,6 +127,7 @@ jobs:
           new = json.loads(Path('/tmp/report-v1.1.json').read_text())
           assert old['schema_version'] == '1.0'
           assert new['schema_version'] == '1.1'
+          assert old['data_product_version'] == new['data_product_version'] == '0.40.0'
           assert 'contract' not in old
           assert new['contract']['backward_compatible_via_negotiation'] == ['1.0']
           assert old['data'] == new['data']
@@ -113,7 +135,7 @@ jobs:
           assert old['row_count'] == new['row_count'] == 7
           assert len(Path('/tmp/report.csv').read_text().splitlines()) == 8
           PY
-      - name: Show recovery, reporting and contract-evolution evidence
+      - name: Show recovery, reporting, contract and workload evidence
         run: |
           cat build/incremental-retail/incremental_summary.json
           cat build/incremental-retail/incremental_recovery_evidence.json
@@ -123,7 +145,8 @@ jobs:
           cat build/incremental-retail/consumer_contract_schema_registry.json
           cat build/incremental-retail/consumer_contract_migrations.json
           cat build/incremental-retail/consumer_contract_evidence.json
-      - name: Upload compact v0.39 operational evidence
+          cat build/incremental-retail/workload_isolation_evidence.json
+      - name: Upload compact v0.40 operational evidence
         uses: actions/upload-artifact@v4
         with:
           name: incremental-real-data-evidence
@@ -132,5 +155,6 @@ jobs:
             build/incremental-retail/incremental_*.csv
             build/incremental-retail/reporting_*.json
             build/incremental-retail/consumer_contract_*.json
+            build/incremental-retail/workload_isolation_*.json
           if-no-files-found: error
           retention-days: 30

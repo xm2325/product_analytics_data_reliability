@@ -48,7 +48,7 @@ def _expected_records(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Independently validate v0.39 reporting-product evidence"
+        description="Independently validate v0.40 reporting-product evidence"
     )
     parser.add_argument("incremental_dir", type=Path)
     parser.add_argument("--ledger", type=Path, default=EXPECTED_LEDGER)
@@ -73,8 +73,11 @@ def main() -> None:
         (root / "incremental_state.json").read_text(encoding="utf-8")
     )
 
-    if contract["version"] != "0.39.0" or contract["schema_version"] != "1.0":
+    if contract["version"] != "0.40.0" or contract["schema_version"] != "1.0":
         raise AssertionError("Unexpected reporting contract version")
+    isolation_rule = str(contract.get("execution_isolation_rule"))
+    if "ephemeral DuckDB connection" not in isolation_rule or "query execution state is not" not in isolation_rule:
+        raise AssertionError("Reporting contract does not expose the v0.40 query-isolation rule")
     names = [row["name"] for row in catalog]
     expected_names = [
         "revenue_gbp",

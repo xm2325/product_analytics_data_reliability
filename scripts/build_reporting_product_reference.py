@@ -47,7 +47,7 @@ def _expected_records(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Build v0.39 reporting-data-product evidence from v0.37 incremental metrics"
+        description="Build v0.40 reporting-data-product evidence from v0.37 incremental metrics"
     )
     parser.add_argument(
         "--incremental-dir",
@@ -172,7 +172,7 @@ def main() -> None:
     contract = reporting_contract()
     catalog = metric_catalog()
     evidence = {
-        "version": "0.39.0",
+        "version": "0.40.0",
         "schema_version": contract["schema_version"],
         "metric_count": len(catalog),
         "metric_store_partitions": partition_count,
