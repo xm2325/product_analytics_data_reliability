@@ -19,7 +19,7 @@ from product_analytics.consumer_contract_evolution import (
 )
 
 
-REPORTING_VERSION = "0.39.0"
+REPORTING_VERSION = "0.40.0"
 REPORTING_SCHEMA_VERSION = DEFAULT_RESPONSE_SCHEMA_VERSION
 MAX_QUERY_DAYS = 366
 
@@ -109,6 +109,7 @@ def reporting_contract() -> dict[str, object]:
         "metric_allowlist": [spec.name for spec in METRIC_SPECS],
         "integrity_rule": "before serving a query, selected metric partitions are SHA-verified and their source SHA/row-count bindings must agree with the pinned canonical manifest and durable incremental state",
         "partition_pruning_rule": "only month partitions intersecting the requested date window are read for metric values",
+        "execution_isolation_rule": "each consumer query uses its own ephemeral DuckDB connection; immutable manifests and state are shared, query execution state is not",
         "consumer_boundary": "the interface exposes historical event-date metrics only; the source has no ingestion timestamp, so it does not claim point-in-time/as-of reconstruction",
         "wall_clock_boundary": "shared-runner latency is diagnostic only; deterministic partition selection and response parity are the stable evidence",
     }
@@ -117,8 +118,9 @@ def reporting_contract() -> dict[str, object]:
 class RetailMetricStore:
     """Versioned, integrity-checked query interface over v0.37 metric partitions.
 
-    The store deliberately stays framework-free. It is the reusable data-product
-    boundary; a network transport can be added later without changing metric
+    The store deliberately stays framework-free. Immutable manifest/state metadata
+    are shared across consumers, while every query gets its own ephemeral DuckDB
+    connection so request execution state is isolated without redefining metric
     semantics or the response contract.
     """
 
@@ -174,13 +176,16 @@ class RetailMetricStore:
         self._validate_selected_partition(first_key)
         if last_key != first_key:
             self._validate_selected_partition(last_key)
-        self._con = duckdb.connect()
         first_path = self._metric_path(first_key)
         last_path = self._metric_path(last_key)
-        bounds = self._con.execute(
-            "SELECT MIN(date), MAX(date) FROM read_parquet(?)",
-            [[str(first_path), str(last_path)]],
-        ).fetchone()
+        con = duckdb.connect()
+        try:
+            bounds = con.execute(
+                "SELECT MIN(date), MAX(date) FROM read_parquet(?)",
+                [[str(first_path), str(last_path)]],
+            ).fetchone()
+        finally:
+            con.close()
         if not bounds or bounds[0] is None or bounds[1] is None:
             raise ReportingContractError("could not determine reporting-store date bounds")
         self.available_start = pd.Timestamp(bounds[0]).date()
@@ -188,7 +193,7 @@ class RetailMetricStore:
         self.initialisation_boundary_partitions_read = 2 if first_path != last_path else 1
 
     def close(self) -> None:
-        self._con.close()
+        """Retained for context-manager compatibility; query connections are request-local."""
 
     def __enter__(self) -> "RetailMetricStore":
         return self
@@ -286,16 +291,20 @@ class RetailMetricStore:
             LEFT JOIN metric_rows m USING (date)
             ORDER BY d.date
         """
-        frame = self._con.execute(
-            sql,
-            [
-                paths,
-                query.start_date.isoformat(),
-                query.end_date.isoformat(),
-                query.start_date.isoformat(),
-                query.end_date.isoformat(),
-            ],
-        ).df()
+        con = duckdb.connect()
+        try:
+            frame = con.execute(
+                sql,
+                [
+                    paths,
+                    query.start_date.isoformat(),
+                    query.end_date.isoformat(),
+                    query.start_date.isoformat(),
+                    query.end_date.isoformat(),
+                ],
+            ).df()
+        finally:
+            con.close()
 
         records: list[dict[str, object]] = []
         for row in frame.to_dict("records"):
