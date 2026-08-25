@@ -122,11 +122,10 @@ def test_query_width_limit_is_contractual(tmp_path: Path) -> None:
             store.query(MetricQuery(date(2010, 1, 1), date(2011, 1, 2), ("orders",)))
 
 
-def test_selected_partition_tampering_is_detected_before_query(tmp_path: Path) -> None:
+def test_boundary_partition_tampering_is_rejected_before_duckdb_read(tmp_path: Path) -> None:
     metric_dir, state, manifest = _fixture(tmp_path)
     target = metric_dir / "2011-02.parquet"
     with target.open("ab") as handle:
         handle.write(b"tamper")
-    with RetailMetricStore(metric_dir, state, manifest) as store:
-        with pytest.raises(ReportingContractError, match="metric SHA"):
-            store.query(MetricQuery(date(2011, 2, 1), date(2011, 2, 1), ("orders",)))
+    with pytest.raises(ReportingContractError, match="metric SHA"):
+        RetailMetricStore(metric_dir, state, manifest)
