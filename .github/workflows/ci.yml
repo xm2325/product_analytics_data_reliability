@@ -28,6 +28,10 @@ jobs:
         run: python scripts/validate_forecast_plan.py build/ci-reference
       - name: Validate contract migration governance
         run: python scripts/validate_contract_migration.py build/ci-reference
+      - name: Build v0.41 downstream evidence invalidation
+        run: python scripts/build_evidence_invalidation_reference.py --base-dir build/ci-reference --output-dir build/evidence-invalidation
+      - name: Independently validate v0.41 evidence invalidation
+        run: python scripts/validate_evidence_invalidation_reference.py --base-dir build/ci-reference --output-dir build/evidence-invalidation
       - name: Validate watermark backtest
         run: python scripts/validate_watermark_backtest.py build/ci-reference
       - name: Validate uncertainty certification
@@ -45,11 +49,14 @@ jobs:
       - name: Show generated evidence inventory
         run: |
           ls -lh build/ci-reference
+          ls -lh build/evidence-invalidation
           cat build/ci-reference/forecast_contract.json
           cat build/ci-reference/forecast_evaluations.csv
           cat build/ci-reference/migration_decisions.json
           cat build/ci-reference/metric_change_impact.csv
           cat build/ci-reference/migration_forecast_impact.csv
+          cat build/evidence-invalidation/evidence_invalidation_summary.csv
+          cat build/evidence-invalidation/evidence_invalidation_evidence.json
           cat build/ci-reference/quality_report.json
           cat build/ci-reference/pricing_experiment_decision.json
           cat build/ci-reference/pricing_guardrail_evidence_plan.json
@@ -67,5 +74,7 @@ jobs:
             build/ci-reference/*.csv
             build/ci-reference/*.json
             build/ci-reference/*.duckdb
+            build/evidence-invalidation/*.csv
+            build/evidence-invalidation/*.json
           if-no-files-found: error
           retention-days: 30
