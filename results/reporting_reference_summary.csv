@@ -1,5 +1,5 @@
 claim,value
-version,0.38.0
+version,0.39.0
 schema_version,1.0
 metric_count,5
 metric_store_partitions,25

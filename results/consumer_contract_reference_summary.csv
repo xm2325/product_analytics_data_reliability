@@ -1,0 +1,17 @@
+claim,value
+version,0.39.0
+schema_family,retail-daily-metrics
+default_schema_version,1.0
+latest_schema_version,1.1
+supported_schema_versions,2
+no_silent_default_migration,true
+v1_0_default_preserved,true
+v1_0_v1_1_data_parity,true
+v1_0_v1_1_query_parity,true
+v1_0_v1_1_response_sha_parity,true
+v1_0_v1_1_work_parity,true
+v1_1_contract_metadata_present,true
+unsupported_schema_rejected,true
+migration_proposals,3
+approved_additive_migrations,1
+withheld_breaking_migrations,2
