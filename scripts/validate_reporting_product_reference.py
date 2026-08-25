@@ -75,7 +75,8 @@ def main() -> None:
 
     if contract["version"] != "0.40.0" or contract["schema_version"] != "1.0":
         raise AssertionError("Unexpected reporting contract version")
-    if "request-local ephemeral DuckDB connection" not in str(contract.get("execution_isolation_rule")):
+    isolation_rule = str(contract.get("execution_isolation_rule"))
+    if "ephemeral DuckDB connection" not in isolation_rule or "query execution state is not" not in isolation_rule:
         raise AssertionError("Reporting contract does not expose the v0.40 query-isolation rule")
     names = [row["name"] for row in catalog]
     expected_names = [
