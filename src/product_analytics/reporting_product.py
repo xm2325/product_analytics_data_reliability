@@ -9,9 +9,18 @@ import json
 import duckdb
 import pandas as pd
 
+from product_analytics.consumer_contract_evolution import (
+    DEFAULT_RESPONSE_SCHEMA_VERSION,
+    LATEST_RESPONSE_SCHEMA_VERSION,
+    SUPPORTED_RESPONSE_SCHEMA_VERSIONS,
+    contract_metadata,
+    get_response_schema,
+    validate_response_shape,
+)
 
-REPORTING_VERSION = "0.38.0"
-REPORTING_SCHEMA_VERSION = "1.0"
+
+REPORTING_VERSION = "0.39.0"
+REPORTING_SCHEMA_VERSION = DEFAULT_RESPONSE_SCHEMA_VERSION
 MAX_QUERY_DAYS = 366
 
 
@@ -86,6 +95,12 @@ def reporting_contract() -> dict[str, object]:
     return {
         "version": REPORTING_VERSION,
         "schema_version": REPORTING_SCHEMA_VERSION,
+        "default_schema_version": DEFAULT_RESPONSE_SCHEMA_VERSION,
+        "latest_schema_version": LATEST_RESPONSE_SCHEMA_VERSION,
+        "supported_schema_versions": list(SUPPORTED_RESPONSE_SCHEMA_VERSIONS),
+        "schema_negotiation_rule": (
+            "existing consumers stay on schema 1.0 unless they explicitly request a newer supported schema"
+        ),
         "dataset": "UCI Online Retail II",
         "grain": "one row per calendar date",
         "partition_key": "calendar month of invoice/event date",
@@ -232,7 +247,20 @@ class RetailMetricStore:
         if unknown:
             raise ReportingContractError(f"unknown metric(s): {unknown}")
 
-    def query(self, query: MetricQuery) -> tuple[dict[str, object], QueryWork]:
+    @staticmethod
+    def _validate_schema_version(schema_version: str) -> None:
+        try:
+            get_response_schema(schema_version)
+        except ValueError as exc:
+            raise ReportingContractError(str(exc)) from exc
+
+    def query(
+        self,
+        query: MetricQuery,
+        *,
+        schema_version: str = DEFAULT_RESPONSE_SCHEMA_VERSION,
+    ) -> tuple[dict[str, object], QueryWork]:
+        self._validate_schema_version(schema_version)
         self._validate_query(query)
         requested_keys = _month_keys_between(query.start_date, query.end_date)
         unavailable = [key for key in requested_keys if key not in self._state_by_key]
@@ -288,7 +316,7 @@ class RetailMetricStore:
         ).encode("utf-8")
         response_hash = sha256(digest_payload).hexdigest()
         response: dict[str, object] = {
-            "schema_version": REPORTING_SCHEMA_VERSION,
+            "schema_version": schema_version,
             "data_product_version": REPORTING_VERSION,
             "dataset": "UCI Online Retail II",
             "query": query_payload,
@@ -302,6 +330,20 @@ class RetailMetricStore:
             "response_sha256": response_hash,
             "data": records,
         }
+        if schema_version == LATEST_RESPONSE_SCHEMA_VERSION:
+            response["contract"] = contract_metadata(metric_catalog())
+        try:
+            validate_response_shape(
+                response,
+                schema_version=schema_version,
+                requested_metrics=query.metrics,
+                strict_top_level=True,
+            )
+        except ValueError as exc:
+            raise ReportingContractError(
+                f"generated response violates schema {schema_version}: {exc}"
+            ) from exc
+
         work = QueryWork(
             partitions_selected=len(requested_keys),
             partition_keys=requested_keys,
