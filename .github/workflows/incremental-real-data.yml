@@ -2,23 +2,30 @@ name: incremental-real-data
 
 on:
   push:
-    branches: [main, v0.37-incremental-recovery]
+    branches: [main, v0.37-incremental-recovery, v0.38-reporting-data-product]
     paths:
       - '.github/workflows/incremental-real-data.yml'
       - 'README.md'
       - 'CHANGELOG.md'
       - 'Makefile'
       - 'docs/INCREMENTAL_RECOVERY_PERFORMANCE.md'
+      - 'docs/REPORTING_DATA_PRODUCT.md'
       - 'requirements.txt'
       - 'pyproject.toml'
       - 'results/incremental_reference_summary.csv'
+      - 'results/reporting_reference_summary.csv'
       - 'src/product_analytics/incremental_retail.py'
+      - 'src/product_analytics/reporting_product.py'
       - 'src/product_analytics/real_retail.py'
       - 'src/product_analytics/real_source_contract.py'
       - 'scripts/build_incremental_retail_reference.py'
+      - 'scripts/build_reporting_product_reference.py'
+      - 'scripts/query_retail_metrics.py'
       - 'scripts/validate_incremental_retail_reference.py'
       - 'scripts/validate_incremental_static_claims.py'
+      - 'scripts/validate_reporting_product_reference.py'
       - 'tests/test_incremental_retail.py'
+      - 'tests/test_reporting_product.py'
   pull_request:
     paths:
       - '.github/workflows/incremental-real-data.yml'
@@ -26,16 +33,23 @@ on:
       - 'CHANGELOG.md'
       - 'Makefile'
       - 'docs/INCREMENTAL_RECOVERY_PERFORMANCE.md'
+      - 'docs/REPORTING_DATA_PRODUCT.md'
       - 'requirements.txt'
       - 'pyproject.toml'
       - 'results/incremental_reference_summary.csv'
+      - 'results/reporting_reference_summary.csv'
       - 'src/product_analytics/incremental_retail.py'
+      - 'src/product_analytics/reporting_product.py'
       - 'src/product_analytics/real_retail.py'
       - 'src/product_analytics/real_source_contract.py'
       - 'scripts/build_incremental_retail_reference.py'
+      - 'scripts/build_reporting_product_reference.py'
+      - 'scripts/query_retail_metrics.py'
       - 'scripts/validate_incremental_retail_reference.py'
       - 'scripts/validate_incremental_static_claims.py'
+      - 'scripts/validate_reporting_product_reference.py'
       - 'tests/test_incremental_retail.py'
+      - 'tests/test_reporting_product.py'
 
 jobs:
   uci-incremental-recovery:
@@ -52,26 +66,44 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install -e .
-      - name: Incremental unit tests
-        run: pytest -q tests/test_incremental_retail.py
+      - name: Incremental and reporting unit tests
+        run: pytest -q tests/test_incremental_retail.py tests/test_reporting_product.py
       - name: Build real incremental and recovery evidence
         run: python scripts/build_incremental_retail_reference.py --output-dir build/incremental-retail
       - name: Independently validate incremental evidence
         run: python scripts/validate_incremental_retail_reference.py build/incremental-retail
       - name: Validate checked-in incremental claims
         run: python scripts/validate_incremental_static_claims.py build/incremental-retail
-      - name: Show recovery and performance evidence
+      - name: Build reporting data product evidence without rescanning source rows
+        run: python scripts/build_reporting_product_reference.py --incremental-dir build/incremental-retail
+      - name: Independently validate reporting data product
+        run: python scripts/validate_reporting_product_reference.py build/incremental-retail
+      - name: Smoke-test JSON and CSV consumer interfaces
+        run: |
+          python scripts/query_retail_metrics.py --incremental-dir build/incremental-retail --start 2010-12-01 --end 2010-12-07 --metrics revenue_gbp,orders,active_customers --format json > /tmp/report.json
+          python scripts/query_retail_metrics.py --incremental-dir build/incremental-retail --start 2010-12-01 --end 2010-12-07 --metrics revenue_gbp,orders,active_customers --format csv > /tmp/report.csv
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          payload = json.loads(Path('/tmp/report.json').read_text())
+          assert payload['row_count'] == 7
+          assert len(Path('/tmp/report.csv').read_text().splitlines()) == 8
+          PY
+      - name: Show recovery, performance and reporting evidence
         run: |
           cat build/incremental-retail/incremental_summary.json
           cat build/incremental-retail/incremental_recovery_evidence.json
           cat build/incremental-retail/incremental_performance.json
-          cat build/incremental-retail/incremental_source_partition_manifest.csv
-      - name: Upload compact v0.37 evidence
+          cat build/incremental-retail/reporting_contract.json
+          cat build/incremental-retail/reporting_evidence.json
+          cat build/incremental-retail/reporting_sample_query.json
+      - name: Upload compact v0.38 operational evidence
         uses: actions/upload-artifact@v4
         with:
           name: incremental-real-data-evidence
           path: |
             build/incremental-retail/incremental_*.json
             build/incremental-retail/incremental_*.csv
+            build/incremental-retail/reporting_*.json
           if-no-files-found: error
           retention-days: 30
