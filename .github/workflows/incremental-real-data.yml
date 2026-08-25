@@ -2,7 +2,7 @@ name: incremental-real-data
 
 on:
   push:
-    branches: [main, v0.37-incremental-recovery, v0.38-reporting-data-product]
+    branches: [main, v0.37-incremental-recovery, v0.38-reporting-data-product, v0.39-consumer-contract-evolution]
     paths:
       - '.github/workflows/incremental-real-data.yml'
       - 'README.md'
@@ -10,22 +10,28 @@ on:
       - 'Makefile'
       - 'docs/INCREMENTAL_RECOVERY_PERFORMANCE.md'
       - 'docs/REPORTING_DATA_PRODUCT.md'
+      - 'docs/CONSUMER_CONTRACT_EVOLUTION.md'
       - 'requirements.txt'
       - 'pyproject.toml'
       - 'results/incremental_reference_summary.csv'
       - 'results/reporting_reference_summary.csv'
+      - 'results/consumer_contract_reference_summary.csv'
       - 'src/product_analytics/incremental_retail.py'
       - 'src/product_analytics/reporting_product.py'
+      - 'src/product_analytics/consumer_contract_evolution.py'
       - 'src/product_analytics/real_retail.py'
       - 'src/product_analytics/real_source_contract.py'
       - 'scripts/build_incremental_retail_reference.py'
       - 'scripts/build_reporting_product_reference.py'
+      - 'scripts/build_consumer_contract_reference.py'
       - 'scripts/query_retail_metrics.py'
       - 'scripts/validate_incremental_retail_reference.py'
       - 'scripts/validate_incremental_static_claims.py'
       - 'scripts/validate_reporting_product_reference.py'
+      - 'scripts/validate_consumer_contract_reference.py'
       - 'tests/test_incremental_retail.py'
       - 'tests/test_reporting_product.py'
+      - 'tests/test_consumer_contract_evolution.py'
   pull_request:
     paths:
       - '.github/workflows/incremental-real-data.yml'
@@ -34,22 +40,28 @@ on:
       - 'Makefile'
       - 'docs/INCREMENTAL_RECOVERY_PERFORMANCE.md'
       - 'docs/REPORTING_DATA_PRODUCT.md'
+      - 'docs/CONSUMER_CONTRACT_EVOLUTION.md'
       - 'requirements.txt'
       - 'pyproject.toml'
       - 'results/incremental_reference_summary.csv'
       - 'results/reporting_reference_summary.csv'
+      - 'results/consumer_contract_reference_summary.csv'
       - 'src/product_analytics/incremental_retail.py'
       - 'src/product_analytics/reporting_product.py'
+      - 'src/product_analytics/consumer_contract_evolution.py'
       - 'src/product_analytics/real_retail.py'
       - 'src/product_analytics/real_source_contract.py'
       - 'scripts/build_incremental_retail_reference.py'
       - 'scripts/build_reporting_product_reference.py'
+      - 'scripts/build_consumer_contract_reference.py'
       - 'scripts/query_retail_metrics.py'
       - 'scripts/validate_incremental_retail_reference.py'
       - 'scripts/validate_incremental_static_claims.py'
       - 'scripts/validate_reporting_product_reference.py'
+      - 'scripts/validate_consumer_contract_reference.py'
       - 'tests/test_incremental_retail.py'
       - 'tests/test_reporting_product.py'
+      - 'tests/test_consumer_contract_evolution.py'
 
 jobs:
   uci-incremental-recovery:
@@ -66,8 +78,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install -e .
-      - name: Incremental and reporting unit tests
-        run: pytest -q tests/test_incremental_retail.py tests/test_reporting_product.py
+      - name: Incremental, reporting and consumer-contract unit tests
+        run: pytest -q tests/test_incremental_retail.py tests/test_reporting_product.py tests/test_consumer_contract_evolution.py
       - name: Build real incremental and recovery evidence
         run: python scripts/build_incremental_retail_reference.py --output-dir build/incremental-retail
       - name: Independently validate incremental evidence
@@ -78,26 +90,40 @@ jobs:
         run: python scripts/build_reporting_product_reference.py --incremental-dir build/incremental-retail
       - name: Independently validate reporting data product
         run: python scripts/validate_reporting_product_reference.py build/incremental-retail
-      - name: Smoke-test JSON and CSV consumer interfaces
+      - name: Build negotiated consumer-contract evidence
+        run: python scripts/build_consumer_contract_reference.py --incremental-dir build/incremental-retail
+      - name: Independently validate consumer-contract evolution
+        run: python scripts/validate_consumer_contract_reference.py build/incremental-retail
+      - name: Smoke-test default, negotiated and CSV consumer interfaces
         run: |
-          python scripts/query_retail_metrics.py --incremental-dir build/incremental-retail --start 2010-12-01 --end 2010-12-07 --metrics revenue_gbp,orders,active_customers --format json > /tmp/report.json
+          python scripts/query_retail_metrics.py --incremental-dir build/incremental-retail --start 2010-12-01 --end 2010-12-07 --metrics revenue_gbp,orders,active_customers --format json > /tmp/report-v1.0.json
+          python scripts/query_retail_metrics.py --incremental-dir build/incremental-retail --start 2010-12-01 --end 2010-12-07 --metrics revenue_gbp,orders,active_customers --format json --schema-version 1.1 > /tmp/report-v1.1.json
           python scripts/query_retail_metrics.py --incremental-dir build/incremental-retail --start 2010-12-01 --end 2010-12-07 --metrics revenue_gbp,orders,active_customers --format csv > /tmp/report.csv
           python - <<'PY'
           import json
           from pathlib import Path
-          payload = json.loads(Path('/tmp/report.json').read_text())
-          assert payload['row_count'] == 7
+          old = json.loads(Path('/tmp/report-v1.0.json').read_text())
+          new = json.loads(Path('/tmp/report-v1.1.json').read_text())
+          assert old['schema_version'] == '1.0'
+          assert new['schema_version'] == '1.1'
+          assert 'contract' not in old
+          assert new['contract']['backward_compatible_via_negotiation'] == ['1.0']
+          assert old['data'] == new['data']
+          assert old['response_sha256'] == new['response_sha256']
+          assert old['row_count'] == new['row_count'] == 7
           assert len(Path('/tmp/report.csv').read_text().splitlines()) == 8
           PY
-      - name: Show recovery, performance and reporting evidence
+      - name: Show recovery, reporting and contract-evolution evidence
         run: |
           cat build/incremental-retail/incremental_summary.json
           cat build/incremental-retail/incremental_recovery_evidence.json
           cat build/incremental-retail/incremental_performance.json
           cat build/incremental-retail/reporting_contract.json
           cat build/incremental-retail/reporting_evidence.json
-          cat build/incremental-retail/reporting_sample_query.json
-      - name: Upload compact v0.38 operational evidence
+          cat build/incremental-retail/consumer_contract_schema_registry.json
+          cat build/incremental-retail/consumer_contract_migrations.json
+          cat build/incremental-retail/consumer_contract_evidence.json
+      - name: Upload compact v0.39 operational evidence
         uses: actions/upload-artifact@v4
         with:
           name: incremental-real-data-evidence
@@ -105,5 +131,6 @@ jobs:
             build/incremental-retail/incremental_*.json
             build/incremental-retail/incremental_*.csv
             build/incremental-retail/reporting_*.json
+            build/incremental-retail/consumer_contract_*.json
           if-no-files-found: error
           retention-days: 30
