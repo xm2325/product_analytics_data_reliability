@@ -48,7 +48,7 @@ def _expected_records(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Independently validate v0.38 reporting-product evidence"
+        description="Independently validate v0.39 reporting-product evidence"
     )
     parser.add_argument("incremental_dir", type=Path)
     parser.add_argument("--ledger", type=Path, default=EXPECTED_LEDGER)
@@ -73,7 +73,7 @@ def main() -> None:
         (root / "incremental_state.json").read_text(encoding="utf-8")
     )
 
-    if contract["version"] != "0.38.0" or contract["schema_version"] != "1.0":
+    if contract["version"] != "0.39.0" or contract["schema_version"] != "1.0":
         raise AssertionError("Unexpected reporting contract version")
     names = [row["name"] for row in catalog]
     expected_names = [
@@ -87,6 +87,10 @@ def main() -> None:
         raise AssertionError(f"Unexpected metric catalog: {names}")
     if int(contract["max_query_days"]) != 366:
         raise AssertionError("Unexpected reporting query-width contract")
+    if contract.get("default_schema_version") != "1.0":
+        raise AssertionError("Reporting default schema moved unexpectedly")
+    if contract.get("latest_schema_version") != "1.1":
+        raise AssertionError("Reporting latest schema is not 1.1")
 
     start = date.fromisoformat(sample["query"]["start_date"])
     end = date.fromisoformat(sample["query"]["end_date"])
