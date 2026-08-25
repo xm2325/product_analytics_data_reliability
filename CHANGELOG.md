@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.41.0
+
+- added **selective downstream evidence invalidation** over the frozen v0.35 controlled decision bundle rather than silently rewriting historical reference evidence;
+- introduced a deterministic **16-node evidence dependency DAG** spanning producer shape, DAU/revenue/paid metric semantics, certified metrics, three DAU forecasts, three planning decisions, the pricing experiment, impact plan and rollout authorisation;
+- fingerprinted governed dependency surfaces with canonical SHA-256 rather than comparing version labels or one global contract hash, so an unused additive field does not create false-positive invalidation;
+- separated evidence freshness from the original business action: stale evidence fails closed as `WITHHOLD_STALE`, while fresh nodes retain their baseline `APPROVE`, `WITHHOLD`, `HOLD` or `COUNTERFACTUAL_ONLY` state;
+- replayed the three existing v0.35 migration proposals through the dependency graph: optional `country` leaves **16/16 nodes fresh**, DAU semantic broadening makes **1 node directly stale + 7 downstream stale = 8 stale**, and required `event_id -> event_uuid` makes **1 direct + 12 downstream = 13 stale**;
+- demonstrated selective isolation under the DAU semantic change: all DAU metric/forecast/planning evidence becomes stale even though the old v0.35 forecast eligibility result was 0/3 changed, while the unrelated pricing experiment/impact/authorisation chain stays fresh with baseline actions `HOLD`, `COUNTERFACTUAL_ONLY` and `WITHHOLD`;
+- added graph validation for duplicate/unknown dependencies and cycles plus five focused unit tests for additive, semantic, breaking and malformed-graph cases;
+- added `build_evidence_invalidation_reference.py` and four derived evidence files without modifying the frozen v0.35 `MANIFEST.json` or static claim ledger;
+- added `validate_evidence_invalidation_reference.py`, which does **not** import the production invalidation module: it independently reconstructs the DAG, recomputes fingerprints, propagates staleness and checks every generated scenario row and exact scenario counts;
+- wired the new build/validator into the controlled GitHub Actions lane and `make check`, while deliberately keeping the reporting data-product version at **0.40.0** and response schemas at **1.0 / 1.1**;
+- advanced repository/package metadata to **0.41.0** and documented the claim boundary: deterministic controlled dependency invalidation, not a production lineage catalogue, scheduler or distributed cache-invalidation system.
+
 ## v0.40.0
 
 - replaced the v0.39 reporting store's persistent shared DuckDB query connection with **request-local ephemeral DuckDB connections**, keeping source manifest and durable partition state immutable/shared while isolating mutable query-execution state per consumer;
