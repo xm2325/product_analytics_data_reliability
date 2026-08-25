@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "product-analytics-data-reliability"
-version = "0.40.0"
-description = "Product analytics and data reliability workbench with multi-consumer workload isolation, governed contract evolution, real-world incremental processing, recovery and reproducible decision evidence"
+version = "0.41.0"
+description = "Product analytics and data reliability workbench with selective evidence invalidation, multi-consumer isolation, governed contract evolution, recovery and reproducible decision evidence"
 requires-python = ">=3.11"
 dependencies = [
   "duckdb>=1.4,<2",
