@@ -22,7 +22,23 @@ def _events() -> pd.DataFrame:
     event_id = 0
     for day in pd.date_range("2026-04-10", periods=3, freq="D", tz="UTC"):
         for product, prefix in [("notes_app", "n"), ("file_transfer", "f"), ("photo_editor", "p")]:
+            # Keep the toy Gold input representative of the real metric contract:
+            # daily_metrics always sees at least one funnel event in addition to
+            # activity and purchase evidence.
+            event_id += 1
+            rows.append(
+                {
+                    "event_id": f"e{event_id}",
+                    "user_id": f"{prefix}-new",
+                    "product": product,
+                    "event_type": "first_open",
+                    "event_ts": day,
+                    "ingested_at": day + pd.Timedelta(minutes=1),
+                    "revenue_gbp": 0.0,
+                }
+            )
             for user in range(3):
+                hour = int(user) + 1
                 event_id += 1
                 rows.append(
                     {
@@ -30,8 +46,8 @@ def _events() -> pd.DataFrame:
                         "user_id": f"{prefix}{user}",
                         "product": product,
                         "event_type": "app_open",
-                        "event_ts": day + pd.Timedelta(hours=user),
-                        "ingested_at": day + pd.Timedelta(hours=user, minutes=1),
+                        "event_ts": day + pd.Timedelta(hours=hour),
+                        "ingested_at": day + pd.Timedelta(hours=hour, minutes=1),
                         "revenue_gbp": 0.0,
                     }
                 )
