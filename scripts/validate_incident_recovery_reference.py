@@ -149,11 +149,10 @@ def _changed_keys(left: pd.DataFrame, right: pd.DataFrame) -> set[tuple[str, obj
         raise AssertionError("Gold key sets differ")
     changed = pd.Series(False, index=left.index, dtype=bool)
     for column in [name for name in left.columns if name not in {"product", "date"}]:
-        a = left[column]
-        b = right[column]
-        equal_values = a.eq(b).fillna(False)
-        equal = equal_values | (a.isna() & b.isna())
-        changed = changed | ~equal.astype(bool)
+        a = pd.to_numeric(left[column], errors="coerce")
+        b = pd.to_numeric(right[column], errors="coerce")
+        equal = a.eq(b) | (a.isna() & b.isna())
+        changed = changed | ~equal
     return set(zip(left.loc[changed, "product"].astype(str), left.loc[changed, "date"]))
 
 
@@ -195,9 +194,7 @@ def validate(base_dir: Path, output_dir: Path) -> None:
     if set(patch["event_type"].astype(str)) != {EVENT_TYPE}:
         raise AssertionError("correction ledger contains non-app_open rows")
     incident_dates = sorted(pd.to_datetime(patch["event_date"], errors="raise").dt.date.unique())
-    if len(incident_dates) != 7 or incident_dates != pd.date_range(
-        incident_dates[0], incident_dates[-1], freq="D"
-    ).date.tolist():
+    if len(incident_dates) != 7 or incident_dates != pd.date_range(incident_dates[0], incident_dates[-1], freq="D").date.tolist():
         raise AssertionError("incident must cover exactly seven contiguous dates")
 
     ids = set(patch["event_id"].astype(str))
@@ -207,9 +204,7 @@ def validate(base_dir: Path, output_dir: Path) -> None:
     base_patch_rows = clean_silver.loc[base_ids.isin(ids)].copy()
     if len(base_patch_rows) != len(patch):
         raise AssertionError("correction ledger does not map one-to-one to clean Silver")
-    if set(base_patch_rows["product"].astype(str)) != {SOURCE_PRODUCT} or set(
-        base_patch_rows["event_type"].astype(str)
-    ) != {EVENT_TYPE}:
+    if set(base_patch_rows["product"].astype(str)) != {SOURCE_PRODUCT} or set(base_patch_rows["event_type"].astype(str)) != {EVENT_TYPE}:
         raise AssertionError("correction ledger does not describe the declared clean source rows")
 
     incident_silver = clean_silver.copy()
@@ -228,11 +223,7 @@ def validate(base_dir: Path, output_dir: Path) -> None:
 
     affected = pd.read_csv(output_dir / "incident_affected_product_dates.csv")
     affected["date"] = pd.to_datetime(affected["date"], errors="raise").dt.date
-    expected_affected = {
-        (product, day)
-        for product in (SOURCE_PRODUCT, INCIDENT_PRODUCT)
-        for day in incident_dates
-    }
+    expected_affected = {(product, day) for product in (SOURCE_PRODUCT, INCIDENT_PRODUCT) for day in incident_dates}
     actual_affected = set(zip(affected["product"].astype(str), affected["date"]))
     if actual_affected != expected_affected or len(affected) != 14:
         raise AssertionError("affected product-date lineage is not exactly 2 products x 7 days")
@@ -251,23 +242,13 @@ def validate(base_dir: Path, output_dir: Path) -> None:
     untouched = incident_gold.loc[[key not in expected_affected for key in incident_keys]]
     corrected_keys = list(zip(corrected_full_gold["product"].astype(str), corrected_full_gold["date"]))
     replacements = corrected_full_gold.loc[[key in expected_affected for key in corrected_keys]]
-    targeted_gold = pd.concat([untouched, replacements], ignore_index=True).sort_values(
-        ["product", "date"]
-    ).reset_index(drop=True)
+    targeted_gold = pd.concat([untouched, replacements], ignore_index=True).sort_values(["product", "date"]).reset_index(drop=True)
     pd.testing.assert_frame_equal(targeted_gold, corrected_full_gold, check_exact=True)
 
     incident_forecasts = _forecasts(incident_gold, incident_silver)
     corrected_forecasts = _forecasts(corrected_full_gold, corrected_silver)
-    _assert_forecasts(
-        pd.read_csv(output_dir / "incident_forecast_evaluations.csv"),
-        incident_forecasts,
-        label="incident",
-    )
-    _assert_forecasts(
-        pd.read_csv(output_dir / "corrected_forecast_evaluations.csv"),
-        corrected_forecasts,
-        label="corrected",
-    )
+    _assert_forecasts(pd.read_csv(output_dir / "incident_forecast_evaluations.csv"), incident_forecasts, label="incident")
+    _assert_forecasts(pd.read_csv(output_dir / "corrected_forecast_evaluations.csv"), corrected_forecasts, label="corrected")
 
     baseline = pd.read_csv(base_dir / "forecast_evaluations.csv")
     baseline_dau = baseline.loc[baseline["metric"].astype(str).str.endswith(":dau")].copy()
@@ -331,11 +312,7 @@ def validate(base_dir: Path, output_dir: Path) -> None:
     expected_reduction = 1.0 - 14 / len(incident_gold)
     if not math.isclose(float(summary["gold_recompute_reduction_fraction"]), expected_reduction, rel_tol=0, abs_tol=1e-12):
         raise AssertionError("deterministic Gold recompute reduction mismatch")
-    for column in [
-        "targeted_gold_equals_clean_rebuild",
-        "targeted_forecasts_equal_clean_rebuild",
-        "corrected_silver_equals_clean_source",
-    ]:
+    for column in ["targeted_gold_equals_clean_rebuild", "targeted_forecasts_equal_clean_rebuild", "corrected_silver_equals_clean_source"]:
         if not _bool(summary[column]):
             raise AssertionError(f"summary parity gate failed: {column}")
 
