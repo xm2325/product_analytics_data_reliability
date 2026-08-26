@@ -37,6 +37,25 @@ def _frame_sha256(frame: pd.DataFrame, *, sort_by: list[str]) -> str:
     return sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _assert_frozen_gold_equivalent(current: pd.DataFrame, frozen: pd.DataFrame) -> None:
+    """Independently check the frozen CSV boundary with explicit null semantics."""
+    left = current.sort_values(["product", "date"]).reset_index(drop=True)
+    right = frozen.sort_values(["product", "date"]).reset_index(drop=True)
+    if list(left.columns) != list(right.columns) or len(left) != len(right):
+        raise AssertionError("frozen Gold shape differs from independent recomputation")
+    for column in ("product", "date"):
+        if not left[column].equals(right[column]):
+            raise AssertionError(f"frozen Gold key column differs: {column}")
+    for column in [name for name in left.columns if name not in {"product", "date"}]:
+        a = pd.to_numeric(left[column], errors="coerce")
+        b = pd.to_numeric(right[column], errors="coerce")
+        if not a.isna().equals(b.isna()):
+            raise AssertionError(f"frozen Gold null pattern differs: {column}")
+        present = a.notna()
+        if ((a.loc[present] - b.loc[present]).abs() > 1e-12).any():
+            raise AssertionError(f"frozen Gold values differ beyond CSV tolerance: {column}")
+
+
 def _daily_metrics(events: pd.DataFrame) -> pd.DataFrame:
     """Independent Pandas reconstruction of the controlled Gold contract."""
     df = events.copy()
@@ -128,11 +147,13 @@ def _changed_keys(left: pd.DataFrame, right: pd.DataFrame) -> set[tuple[str, obj
         right[["product", "date"]].itertuples(index=False, name=None)
     ):
         raise AssertionError("Gold key sets differ")
-    changed = pd.Series(False, index=left.index)
+    changed = pd.Series(False, index=left.index, dtype=bool)
     for column in [name for name in left.columns if name not in {"product", "date"}]:
         a = left[column]
         b = right[column]
-        changed |= ~(a.eq(b) | (a.isna() & b.isna()))
+        equal_values = a.eq(b).fillna(False)
+        equal = equal_values | (a.isna() & b.isna())
+        changed = changed | ~equal.astype(bool)
     return set(zip(left.loc[changed, "product"].astype(str), left.loc[changed, "date"]))
 
 
@@ -203,16 +224,7 @@ def validate(base_dir: Path, output_dir: Path) -> None:
 
     incident_gold = _daily_metrics(incident_silver)
     corrected_full_gold = _daily_metrics(corrected_silver)
-    # The frozen Gold CSV has crossed a decimal text serialization boundary.
-    # Permit only round-trip floating-point noise here; targeted parity stays exact below.
-    pd.testing.assert_frame_equal(
-        corrected_full_gold,
-        clean_gold,
-        check_exact=False,
-        rtol=0.0,
-        atol=1e-12,
-        check_dtype=False,
-    )
+    _assert_frozen_gold_equivalent(corrected_full_gold, clean_gold)
 
     affected = pd.read_csv(output_dir / "incident_affected_product_dates.csv")
     affected["date"] = pd.to_datetime(affected["date"], errors="raise").dt.date
@@ -235,8 +247,6 @@ def validate(base_dir: Path, output_dir: Path) -> None:
     if stored_changed_keys != expected_affected or len(stored_changed) != 14:
         raise AssertionError("stored Gold change evidence scope mismatch")
 
-    # Independently emulate targeted repair by replacing only the declared 14
-    # product-date rows with rows from the corrected source aggregate.
     incident_keys = list(zip(incident_gold["product"].astype(str), incident_gold["date"]))
     untouched = incident_gold.loc[[key not in expected_affected for key in incident_keys]]
     corrected_keys = list(zip(corrected_full_gold["product"].astype(str), corrected_full_gold["date"]))
