@@ -32,6 +32,10 @@ jobs:
         run: python scripts/build_evidence_invalidation_reference.py --base-dir build/ci-reference --output-dir build/evidence-invalidation
       - name: Independently validate v0.41 evidence invalidation
         run: python scripts/validate_evidence_invalidation_reference.py --base-dir build/ci-reference --output-dir build/evidence-invalidation
+      - name: Build v0.42 selective evidence revalidation
+        run: python scripts/build_evidence_revalidation_reference.py --base-dir build/ci-reference --output-dir build/evidence-revalidation
+      - name: Independently validate v0.42 evidence revalidation
+        run: python scripts/validate_evidence_revalidation_reference.py --base-dir build/ci-reference --output-dir build/evidence-revalidation
       - name: Validate watermark backtest
         run: python scripts/validate_watermark_backtest.py build/ci-reference
       - name: Validate uncertainty certification
@@ -50,6 +54,7 @@ jobs:
         run: |
           ls -lh build/ci-reference
           ls -lh build/evidence-invalidation
+          ls -lh build/evidence-revalidation
           cat build/ci-reference/forecast_contract.json
           cat build/ci-reference/forecast_evaluations.csv
           cat build/ci-reference/migration_decisions.json
@@ -57,6 +62,8 @@ jobs:
           cat build/ci-reference/migration_forecast_impact.csv
           cat build/evidence-invalidation/evidence_invalidation_summary.csv
           cat build/evidence-invalidation/evidence_invalidation_evidence.json
+          cat build/evidence-revalidation/evidence_revalidation_summary.csv
+          cat build/evidence-revalidation/evidence_revalidation_evidence.json
           cat build/ci-reference/quality_report.json
           cat build/ci-reference/pricing_experiment_decision.json
           cat build/ci-reference/pricing_guardrail_evidence_plan.json
@@ -76,5 +83,7 @@ jobs:
             build/ci-reference/*.duckdb
             build/evidence-invalidation/*.csv
             build/evidence-invalidation/*.json
+            build/evidence-revalidation/*.csv
+            build/evidence-revalidation/*.json
           if-no-files-found: error
           retention-days: 30
