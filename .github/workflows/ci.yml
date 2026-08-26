@@ -36,6 +36,10 @@ jobs:
         run: python scripts/build_evidence_revalidation_reference.py --base-dir build/ci-reference --output-dir build/evidence-revalidation
       - name: Independently validate v0.42 evidence revalidation
         run: python scripts/validate_evidence_revalidation_reference.py --base-dir build/ci-reference --output-dir build/evidence-revalidation
+      - name: Build v0.43 incident correction and replay evidence
+        run: python scripts/build_incident_recovery_reference.py --base-dir build/ci-reference --output-dir build/incident-recovery
+      - name: Independently validate v0.43 incident recovery
+        run: python scripts/validate_incident_recovery_reference.py --base-dir build/ci-reference --output-dir build/incident-recovery
       - name: Validate watermark backtest
         run: python scripts/validate_watermark_backtest.py build/ci-reference
       - name: Validate uncertainty certification
@@ -55,6 +59,7 @@ jobs:
           ls -lh build/ci-reference
           ls -lh build/evidence-invalidation
           ls -lh build/evidence-revalidation
+          ls -lh build/incident-recovery
           cat build/ci-reference/forecast_contract.json
           cat build/ci-reference/forecast_evaluations.csv
           cat build/ci-reference/migration_decisions.json
@@ -64,6 +69,9 @@ jobs:
           cat build/evidence-invalidation/evidence_invalidation_evidence.json
           cat build/evidence-revalidation/evidence_revalidation_summary.csv
           cat build/evidence-revalidation/evidence_revalidation_evidence.json
+          cat build/incident-recovery/incident_recovery_summary.csv
+          cat build/incident-recovery/decision_supersession_ledger.csv
+          cat build/incident-recovery/incident_recovery_evidence.json
           cat build/ci-reference/quality_report.json
           cat build/ci-reference/pricing_experiment_decision.json
           cat build/ci-reference/pricing_guardrail_evidence_plan.json
@@ -85,5 +93,7 @@ jobs:
             build/evidence-invalidation/*.json
             build/evidence-revalidation/*.csv
             build/evidence-revalidation/*.json
+            build/incident-recovery/*.csv
+            build/incident-recovery/*.json
           if-no-files-found: error
           retention-days: 30
