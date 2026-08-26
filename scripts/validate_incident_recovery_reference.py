@@ -56,6 +56,22 @@ def _assert_frozen_gold_equivalent(current: pd.DataFrame, frozen: pd.DataFrame) 
             raise AssertionError(f"frozen Gold values differ beyond CSV tolerance: {column}")
 
 
+def _coerce_gold_schema(frame: pd.DataFrame, template: pd.DataFrame) -> pd.DataFrame:
+    """Independently restore clean-rebuild dtypes after partial row stitching."""
+    out = frame.copy()
+    for column in template.columns:
+        target_dtype = template[column].dtype
+        if pd.api.types.is_numeric_dtype(target_dtype):
+            out[column] = pd.to_numeric(out[column], errors="coerce").astype(target_dtype)
+        elif column != "date":
+            try:
+                out[column] = out[column].astype(target_dtype)
+            except (TypeError, ValueError):
+                if str(target_dtype) != "object":
+                    raise
+    return out
+
+
 def _daily_metrics(events: pd.DataFrame) -> pd.DataFrame:
     """Independent Pandas reconstruction of the controlled Gold contract."""
     df = events.copy()
@@ -242,7 +258,9 @@ def validate(base_dir: Path, output_dir: Path) -> None:
     untouched = incident_gold.loc[[key not in expected_affected for key in incident_keys]]
     corrected_keys = list(zip(corrected_full_gold["product"].astype(str), corrected_full_gold["date"]))
     replacements = corrected_full_gold.loc[[key in expected_affected for key in corrected_keys]]
-    targeted_gold = pd.concat([untouched, replacements], ignore_index=True).sort_values(["product", "date"]).reset_index(drop=True)
+    targeted_gold = pd.concat([untouched, replacements], ignore_index=True)
+    targeted_gold = _coerce_gold_schema(targeted_gold, corrected_full_gold)
+    targeted_gold = targeted_gold.sort_values(["product", "date"]).reset_index(drop=True)
     pd.testing.assert_frame_equal(targeted_gold, corrected_full_gold, check_exact=True)
 
     incident_forecasts = _forecasts(incident_gold, incident_silver)
