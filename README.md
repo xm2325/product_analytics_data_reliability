@@ -1,15 +1,15 @@
 # Product Analytics & Data Reliability Workbench
 
-**Version:** v0.42  
+**Version:** v0.43  
 **Stack:** Python · DuckDB · SQL · Pandas · NumPy · SciPy · Statsmodels · Parquet · Pytest · GitHub Actions
 
-A reproducible analytics workbench for deciding when data, metrics, forecasts and experiments are trustworthy enough to support a business decision — and for keeping those decisions trustworthy as upstream data, KPI definitions, consumer contracts and concurrent workloads evolve.
+A reproducible analytics workbench for deciding when data, metrics, forecasts and experiments are trustworthy enough to support a business decision — and for keeping those decisions trustworthy as upstream data, KPI definitions, source records, consumer contracts and concurrent workloads evolve.
 
 The repository is organised around one principle:
 
-> **A result is not trustworthy merely because it was correct when first computed. It must still be supported by the governed evidence assumptions in force when someone acts on it.**
+> **A result is not trustworthy merely because it was correct when first computed. It must still be supported by the governed evidence assumptions and source records in force when someone acts on it.**
 
-The evidence chain now covers eight complementary layers:
+The evidence chain now covers nine complementary layers:
 
 ```text
 controlled decision evidence
@@ -28,6 +28,10 @@ selective evidence revalidation
     -> explicit adoption, minimal rebuild sets, exact unaffected reuse,
        independent recovery verification and fail-closed blocked states
 
+source-incident correction and decision supersession
+    -> keyed correction ledger, affected-scope derivation,
+       selective replay, clean-rebuild parity and historical decision lineage
+
 public real-world evidence
     -> UCI schema adaptation, source quality, metric semantics,
        frozen forecast portability and independent recomputation
@@ -45,45 +49,84 @@ multi-consumer execution evidence
        deterministic work accounting and failure isolation
 ```
 
-## v0.42 headline: stale evidence must be selectively rebuilt before reuse
+## v0.43 headline: a valid-looking source error can invalidate a published decision
 
-v0.41 answered **which old evidence becomes stale when a governed dependency changes**. v0.42 answers the operational follow-up:
+v0.37 proves technical recovery from incomplete or damaged materialisation. v0.42 proves selective revalidation after an explicitly governed semantic change. v0.43 covers a different failure mode:
 
-> **Can that evidence be recovered, and if so, what is the smallest governed rebuild that restores a fully fresh decision graph?**
+> **What happens when source records passed the row-level contract, were used in downstream evidence, and are only later discovered to be factually misrouted?**
 
-The reference graph contains **16 evidence nodes**. A DAU semantic change makes exactly eight nodes stale:
+The controlled incident relabels every `notes_app` `app_open` in one historical seven-day forecast horizon as `file_transfer`. Event IDs, event types, timestamps and revenue remain valid, so ordinary row-level quality checks reject **0 rows**. The error is business-semantic, not syntactic.
+
+### Validated incident and repair
+
+| v0.43 controlled evidence | Result |
+|---|---:|
+| Incident dates | **2026-04-10 to 2026-04-16** |
+| Schema-valid misrouted events | **5,543** |
+| Row-level quality rejects | **0** |
+| Affected products | **2** |
+| Affected Gold product-days | **14** |
+| Total Gold product-days | **450** |
+| Gold rows selectively recomputed | **14** |
+| Gold rows reused | **436** |
+| Gold rows not recomputed | **96.89%** |
+| Forecast series recomputed | **2** |
+| Forecast series reused | **1** |
+| Published decisions superseded | **2** |
+| Superseded decisions whose action changed | **2** |
+| Unaffected decisions retained | **1** |
+
+The 96.89% figure is deterministic **Gold-row recomputation reduction**, not a latency or speedup claim.
+
+### Correction fails closed
+
+The correction ledger is keyed by `event_id`. A correction is rejected if it contains duplicate or unknown IDs, or if the current incident rows no longer match the declared incident product, event type or event date. A stale or tampered correction therefore cannot silently rewrite history.
+
+The ledger determines the affected scope explicitly:
 
 ```text
-semantic:dau
-    ↓
-metric:dau
-    ↓
-3 DAU forecasts
-    ↓
-3 DAU planning decisions
+5,543 corrected event_ids
+        ↓
+2 products × 7 dates
+        ↓
+14 Gold product-day rows
+        ↓
+2 DAU forecast series
+        ↓
+2 published planning decisions
 ```
 
-The other eight nodes — producer shape, revenue/paid semantic and metric evidence, pricing experiment, impact and rollout authorisation — are unaffected.
+`photo_editor` is outside that lineage and its forecast/decision evidence is reused rather than recomputed.
 
-### Silent replacement is still WITHHOLD
+### Selective replay must equal a clean rebuild
 
-The frozen v0.35 migration proposal broadens DAU from `app_open` to any certified event. It changed portfolio DAU by up to **+4.94%**, above the pre-specified **1% semantic compatibility tolerance**, so it remains **WITHHOLD as a silent replacement**.
-
-v0.42 does **not** relax that tolerance and does **not** reinterpret the historical decision.
-
-Instead, it models a separate governance event: an explicit, versioned decision to adopt the new DAU definition. Only after that explicit adoption is the stale DAU evidence eligible for rebuilding.
+The core release gate is not merely that the repair “looks plausible”. v0.43 requires:
 
 ```text
-semantic candidate
-      ↓
-silent replacement?
-      ├─ yes → original WITHHOLD remains binding
-      └─ no, explicit versioned adoption
-                  ↓
-            selective revalidation
+corrected Silver == clean source Silver                  exact
+selectively repaired Gold == clean full Gold rebuild    exact
+selectively replayed forecasts == clean full forecasts  exact
 ```
 
-### Four governed recovery scenarios
+The Gold equality includes the product/date key set, values and final dtypes. Historical CSV evidence is compared separately with an explicit `1e-12` absolute tolerance only at the decimal text serialisation boundary; that tolerance is not used for targeted-vs-clean replay parity.
+
+### Published decisions are superseded, not overwritten
+
+When corrected evidence changes a published forecast, the old planning record remains present as `SUPERSEDED` and points to a new `ACTIVE` replacement with reason `SOURCE_DATA_CORRECTION`. If evidence is unaffected, no artificial replacement version is created; the original decision remains `ACTIVE_UNCHANGED`.
+
+In the controlled incident both affected DAU planning actions are wrong under the incident state and both recover after correction, so **2/2 superseded decisions also have an action change**. The unrelated `photo_editor:dau` decision remains exactly reusable.
+
+The independent validator does not import `product_analytics.incident_recovery`. It reconstructs the incident, correction, Gold aggregation, targeted row stitching, forecasting evidence, supersession cardinality and hashes independently, and independently restores clean-rebuild dtypes before requiring exact replay parity.
+
+See [`docs/INCIDENT_RECOVERY.md`](docs/INCIDENT_RECOVERY.md).
+
+## v0.42: stale evidence must be selectively rebuilt before reuse
+
+v0.41 answers which evidence becomes stale when a governed dependency changes. v0.42 asks whether it can be recovered with the smallest governed rebuild.
+
+A DAU semantic change makes eight of 16 evidence nodes stale: `semantic:dau`, `metric:dau`, three DAU forecasts and three planning decisions. The producer shape, revenue/paid evidence and pricing chain remain unaffected.
+
+The frozen v0.35 proposal to broaden DAU from `app_open` to any certified event changed portfolio DAU by up to **+4.94%**, above the pre-specified **1% semantic compatibility tolerance**, so silent replacement remains **WITHHOLD**. v0.42 models a separate explicit, versioned semantic-adoption event; only then is selective revalidation allowed.
 
 | Scenario | Initial stale | Revalidated | Exact reused | Final stale | Result |
 |---|---:|---:|---:|---:|---|
@@ -92,42 +135,13 @@ silent replacement?
 | explicit versioned DAU adoption | 8 | 8 | 8 | 0 | **REVALIDATED** |
 | required `event_id → event_uuid` producer break | 13 | 0 | 3 | 13 | **BLOCKED** |
 
-The explicit DAU adoption therefore proves both **minimal recomputation** and **exact reuse**:
-
-| Deterministic v0.42 work | Result |
-|---|---:|
-| Gold product-day metric rows recomputed | **450** |
-| DAU forecast series recomputed | **3** |
-| Planning decisions recomputed | **3** |
-| Pricing-chain nodes recomputed | **0** |
-| DAG nodes revalidated | **8** |
-| DAG nodes reused exactly | **8** |
-| Final fresh nodes | **16 / 16** |
-| Final stale nodes | **0** |
-
-The planner rejects partial rebuilds. A `READY` plan can only become `REVALIDATED` when replacement evidence exists for **every** planned stale node and the resulting graph independently verifies as fully fresh.
-
-### The forecast evidence is genuinely rerun
-
-The builder does not repair freshness by swapping hashes. It takes the frozen controlled Gold layer, adopts `dau_legacy_any_event` as the explicitly versioned candidate series, and reruns the existing leakage-safe rolling-origin forecast contract for all three products.
-
-| Product | Candidate WAPE | Last-value benchmark WAPE | Interval coverage | Revalidated action |
-|---|---:|---:|---:|---|
-| `file_transfer` | **5.53%** | 7.58% | 100% | **APPROVE** |
-| `notes_app` | **4.06%** | 4.51% | 100% | **APPROVE** |
-| `photo_editor` | **3.77%** | 2.46% | 100% | **WITHHOLD** |
-
-`photo_editor` remains deliberately instructive: the candidate has low absolute error, but the trivial last-value benchmark is better, so the planning action stays withheld after the semantic adoption.
-
-The independent v0.42 validator reconstructs these candidate forecasts from Gold/Silver and cross-checks them against the separately validated frozen v0.35 migration replay. It also proves that all eight unaffected nodes are byte-for-byte equivalent at the model level and that the pricing experiment/impact/authorisation chain was not recomputed.
+The explicit adoption recomputes 450 Gold product-day rows, three DAU forecast series and three planning decisions while reusing the other 8/16 DAG nodes exactly. The candidate forecast actions remain evidence-driven: `file_transfer` 5.53% WAPE APPROVE, `notes_app` 4.06% APPROVE, and `photo_editor` 3.77% WITHHOLD because its 2.46% last-value benchmark is better.
 
 See [`docs/EVIDENCE_REVALIDATION.md`](docs/EVIDENCE_REVALIDATION.md).
 
 ## v0.41: upstream changes invalidate only the evidence they actually break
 
-v0.41 introduced a **16-node evidence dependency DAG** with deterministic SHA-256 fingerprints over governed dependency surfaces rather than one noisy global contract hash.
-
-A stored result becomes stale when either its own governed fingerprint changes or any dependency it was built from is stale. Stale evidence fails closed as `WITHHOLD_STALE`; the original business action remains separately recorded.
+v0.41 introduced a 16-node dependency DAG with canonical SHA-256 fingerprints over governed dependency surfaces.
 
 | Change | Existing migration action | Fresh | Direct stale | Downstream stale | Total stale | Pricing chain fresh |
 |---|---|---:|---:|---:|---:|---|
@@ -135,42 +149,13 @@ A stored result becomes stale when either its own governed fingerprint changes o
 | broaden DAU to any certified event | **WITHHOLD** | 8 | 1 | 7 | 8 | yes |
 | rename required `event_id → event_uuid` | **WITHHOLD** | 3 | 1 | 12 | 13 | no |
 
-The DAU case is the key counterexample: v0.35 found **0/3 forecast eligibility changes**, yet v0.41 correctly marks the old DAU forecast evidence stale because its KPI semantics changed. Unchanged downstream output cannot make stale evidence fresh.
-
-The pricing experiment, impact and authorisation remain fresh under the DAU-only change because they depend on revenue and paid-subscription evidence, not DAU.
+The DAU case is deliberately important: v0.35 observed 0/3 forecast eligibility changes, yet the old DAU forecasts are still stale because their KPI semantics changed. Unchanged output cannot make stale evidence fresh.
 
 See [`docs/EVIDENCE_INVALIDATION.md`](docs/EVIDENCE_INVALIDATION.md).
 
 ## v0.40: concurrent consumers must not change the answer
 
-The reporting store keeps immutable manifest/state metadata shared while every query creates and closes its own request-local DuckDB connection.
-
-The reference workload uses the pinned **1,067,371-row UCI Online Retail II** source and its 25-partition metric store.
-
-| Workload-isolation check | Validated result |
-|---|---:|
-| Reporting data-product version | **0.40.0** |
-| Default / latest JSON schema | **1.0 / 1.1** |
-| Valid requests / consumers | **12 / 12** |
-| Concurrent workers | **8** |
-| Mixed workload requests | **15** |
-| Injected invalid consumers | **3** |
-| Intended failures isolated | **3 / 3** |
-| Aggregate metric partitions selected | **27** |
-| Unique metric partitions touched | **16** |
-| Aggregate response rows | **652** |
-| Serial vs concurrent compact results | **exact parity** |
-| Serial vs concurrent workload digest | **exact parity** |
-| Parallel consumers on the same hot window | **6** |
-| Unique full-payload hashes | **1** |
-
-The deterministic workload fingerprint is:
-
-```text
-ef1adcc2dc091ad9ad00c16175ea7b38c8f6fec084c4c1700c6c50c127376e7e
-```
-
-Three deliberately invalid consumers — unknown metric, unsupported schema `2.0`, duplicate metric — fail without changing healthy results in the same concurrent batch or in a later healthy replay.
+The reporting store keeps immutable manifest/state metadata shared while every request creates its own DuckDB connection. On the pinned 1,067,371-row UCI source, 12 valid consumers replay exactly under eight workers; a 15-request mixed workload isolates all 3/3 injected invalid consumers; 652 aggregate response rows and 27 selected metric partitions are identical to serial execution. Six consumers of the same hot window produce one unique full-payload hash.
 
 No QPS, latency, throughput or speedup gate is claimed from shared GitHub runners.
 
@@ -178,102 +163,49 @@ See [`docs/WORKLOAD_ISOLATION.md`](docs/WORKLOAD_ISOLATION.md).
 
 ## v0.39: evolve the interface without silently migrating consumers
 
-The data-product release version is separate from the public response-schema version. Existing/unversioned JSON consumers remain on schema **1.0**; schema **1.1** is explicit opt-in.
-
-| Proposal | Classification | Decision |
-|---|---|---|
-| add negotiated `contract` metadata | ADDITIVE | **APPROVE** |
-| rename `row_count → rows` | BREAKING | **WITHHOLD** |
-| change `orders` integer → float | BREAKING | **WITHHOLD** |
-
-The same real-data request under schemas 1.0 and 1.1 preserves query payload, metric rows, response SHA and deterministic partition work exactly.
+Schema 1.0 remains the default; schema 1.1 is explicit opt-in. Additive contract metadata is approved, while renaming `row_count → rows` and changing `orders` integer → float are breaking and withheld. The same real-data request preserves query payload, metric rows, response SHA and deterministic partition work under both schemas.
 
 See [`docs/CONSUMER_CONTRACT_EVOLUTION.md`](docs/CONSUMER_CONTRACT_EVOLUTION.md).
 
 ## v0.38: bounded reporting data product
 
-Five allowlisted daily metrics are exposed through a framework-independent Python interface and JSON/CSV CLI:
-
-- `revenue_gbp`
-- `orders`
-- `units`
-- `purchase_lines`
-- `active_customers`
-
-The reporting store covers **2009-12-01 through 2011-12-09**, bounds requests to **366 days**, zero-fills missing calendar days and SHA-verifies selected metric partitions before serving them.
-
-The pinned seven-day query selects **1 of 25** monthly metric partitions for metric values — a **96% partition-selection reduction**, not a latency claim — and exactly reconciles to the validated daily layer. Unknown, over-wide and tampered requests fail closed.
+Five allowlisted daily metrics — `revenue_gbp`, `orders`, `units`, `purchase_lines`, `active_customers` — are exposed through a Python interface and JSON/CSV CLI. The store covers 2009-12-01 through 2011-12-09 and bounds requests to 366 days. The pinned seven-day query selects 1 of 25 metric partitions, a 96% partition-selection reduction, not a latency claim.
 
 See [`docs/REPORTING_DATA_PRODUCT.md`](docs/REPORTING_DATA_PRODUCT.md).
 
 ## v0.37: incremental recovery and targeted repair
 
-The real source is canonicalised into **25 immutable monthly Parquet partitions** with row counts and SHA-256 provenance. Durable state supports exact restart, no-op and targeted repair behaviour.
-
-| Operational check | Validated result |
-|---|---:|
-| Real source rows | **1,067,371** |
-| Full vs incremental metrics | **exact match** |
-| Idempotent no-op source rows scanned | **0** |
-| Restart partitions skipped | **7** |
-| Durable rows reused after restart | **257,045** |
-| Targeted repair partition | `2010-12` |
-| Targeted repair source rows scanned | **65,004** |
-| Repair scan reduction vs full source | **93.91%** |
-| Repaired output hashes | **exact match** |
-| Full source integrity audit | **25 / 25 SHA-verified** |
-
-Shared-runner timings remain diagnostic; stable claims use deterministic rows, partitions and hashes.
+The real source is canonicalised into 25 immutable monthly Parquet partitions with row counts and SHA-256 provenance. Unchanged reruns scan 0 source rows. Interrupted recovery reuses seven completed partitions / 257,045 rows. Repairing corrupted `2010-12` scans only 65,004 rows, a 93.91% source-row scan reduction versus full rebuild, then restores exact output hashes.
 
 See [`docs/INCREMENTAL_RECOVERY_PERFORMANCE.md`](docs/INCREMENTAL_RECOVERY_PERFORMANCE.md).
 
 ## v0.36: external real-world portability
 
-The external lane uses **UCI Online Retail II**, public real historical transactions from a UK-based non-store online retailer (DOI `10.24432/C5CG6D`, CC BY 4.0). GitHub Actions downloads the official source and verifies pinned archive/workbook SHA-256 values.
-
-Observed source facts include **1,067,371 rows**, **739 calendar days**, **1,041,670 valid purchase-line rows**, **243,007 missing CustomerID rows**, **19,494 cancellation rows** and **12,133 exact duplicates** excluding the generated source-row ID.
-
-Real data is allowed to fail frozen rules. All four external forecast series are withheld under the pre-existing forecasting contract. `orders`, for example, has **15.31% WAPE** but **20.94% MAPE**, just above the frozen 20% gate.
-
-Two plausible metric replacements are also withheld as silent drop-ins because signed transaction value changes purchase revenue by **-8.04%** and an any-transaction customer population changes the purchasing-customer population by **+1.09%** against the declared 1% compatibility tolerance.
+The external lane uses official **UCI Online Retail II** historical transactions. The source contains 1,067,371 rows. Frozen decision rules are not retuned after seeing real data: all four external forecast series are withheld; `orders` has 15.31% WAPE but 20.94% MAPE, just above the frozen 20% gate. Signed transaction value changes purchase revenue by -8.04%, and an any-transaction customer population changes the purchasing-customer population by +1.09% against the declared 1% compatibility threshold; both silent semantic replacements are withheld.
 
 See [`docs/REAL_DATA_PORTABILITY.md`](docs/REAL_DATA_PORTABILITY.md).
 
 ## Controlled decision evidence
 
-Synthetic evidence is retained where the public source lacks the fields needed for controlled counterexamples.
+Synthetic controlled evidence remains where the public source lacks fields required for clean counterexamples.
 
-### Metric and producer evolution — v0.35
-
-A **450 product-day shadow replay** evaluates three migrations. Optional `country` is approved; required `event_id → event_uuid` and DAU semantic broadening are withheld. The semantic candidate changes aggregate DAU by up to **+4.94%** even though downstream forecast eligibility happens not to change.
-
-### Forecast decisioning — v0.34
-
-The controlled forecast reference evaluates four rolling origins × seven-day horizons. `photo_editor:dau` has **3.92% WAPE**, but the simpler last-value benchmark has **2.56%**, so the candidate remains withheld. Low absolute error is not sufficient if a trivial benchmark is better.
-
-### Experiment and impact decisioning — v0.32–v0.33
-
-The deterministic 8,000-user pricing experiment estimates **+£0.6851/user/30d** with a positive 95% confidence interval, but its paid-conversion guardrail fails. The experiment remains **HOLD**.
-
-A hypothetical 150,000-user cohort plan implies about **£102,762** counterfactual 30-day incremental revenue, but decision-authorised treated users remain **0** and authorised incremental revenue remains null.
-
-### Freshness uncertainty
-
-Controlled processing-time evidence distinguishes observed stability from statistical certification. A 96h candidate is stable across nine rolling windows, but **no candidate is certified at 95% family-wise confidence** under the declared model.
-
-The real UCI source has invoice/event time but no independent ingestion timestamp, so no real-data watermark/as-of claim is fabricated.
+- **Metric / producer evolution — v0.35:** 450 product-day shadow replay; optional `country` approved; required event-ID rename and DAU semantic broadening withheld.
+- **Forecast decisioning — v0.34:** four rolling origins × seven-day horizons; `photo_editor:dau` is withheld despite 3.92% WAPE because the last-value benchmark is better at 2.56%.
+- **Experiment / impact — v0.32–v0.33:** deterministic 8,000-user pricing experiment estimates +£0.6851/user/30d with a positive 95% CI, but the paid-conversion guardrail fails, so the experiment remains HOLD. A hypothetical 150,000-user plan implies about £102,762 counterfactual incremental revenue; authorised treated users remain 0.
+- **Freshness uncertainty:** 96h is observed stable over nine rolling windows, but no candidate is family-wise certified at 95% under the declared model.
 
 ## Validation architecture
 
-Historical evidence boundaries are kept explicit instead of rewriting older bundles when a later release adds a new concern.
+Historical evidence boundaries remain explicit instead of being rewritten by later releases.
 
 ```text
 controlled deterministic lane
-  pytest (111 repository tests)
+  pytest (117 repository tests)
   → frozen v0.35 reference build
   → forecast / migration validators
-  → v0.41 dependency-graph build + independent invalidation validator
+  → v0.41 dependency graph + independent invalidation validator
   → v0.42 selective rebuild + independent revalidation validator
+  → v0.43 source incident build + independent correction/replay validator
   → watermark / uncertainty / evidence-plan validators
   → experiment / impact validators
   → frozen v0.35 pinned/static claim validators
@@ -295,7 +227,6 @@ operational consumer lane
   → serial vs 8-worker concurrent exact replay
   → mixed invalid-consumer failure isolation
   → independent workload recomputation
-  → deterministic workload claim ledger
 ```
 
 ## Reproduce
@@ -306,12 +237,12 @@ source .venv/bin/activate
 pip install -r requirements.txt
 pip install -e .
 
-make check             # controlled reference + invalidation + revalidation
-make real-check        # network-enabled external UCI lane
-make incremental-check # recovery/reporting/contract/workload lane
+make check
+make real-check
+make incremental-check
 ```
 
-The v0.41/v0.42 governance layers can be run directly after the controlled reference:
+The controlled governance/recovery layers can also be run directly after the controlled reference:
 
 ```bash
 make reference
@@ -319,32 +250,20 @@ make invalidation-reference
 make invalidation-validate
 make revalidation-reference
 make revalidation-validate
-```
-
-A reporting query can be executed directly:
-
-```bash
-python scripts/query_retail_metrics.py \
-  --incremental-dir build/incremental-retail \
-  --start 2010-12-01 \
-  --end 2010-12-07 \
-  --metrics revenue_gbp,orders,active_customers \
-  --format json \
-  --schema-version 1.1
+python scripts/build_incident_recovery_reference.py --base-dir build/reference --output-dir build/incident-recovery
+python scripts/validate_incident_recovery_reference.py --base-dir build/reference --output-dir build/incident-recovery
 ```
 
 ## Claim boundaries
 
 - UCI Online Retail II is public real-world historical data; this repository is not a production deployment and does not claim access to private company systems.
+- v0.43 is a **controlled source-incident counterexample**. The 5,543 misrouted events are deliberately injected into frozen controlled evidence; they are not a claim about a real company incident.
+- v0.43 proves keyed correction, affected-scope derivation, selective replay, decision supersession and exact clean-rebuild parity in this controlled system. It is not a production CDC platform, distributed lineage scheduler or incident-management service.
+- The v0.43 **96.89%** figure is deterministic Gold rows avoided during recomputation (436/450), not wall-clock speedup, latency reduction, QPS or throughput.
+- The frozen v0.35 DAU semantic proposal remains WITHHOLD as a silent replacement. v0.42 explicit adoption is a separate governance event, not a post-hoc relaxation of the 1% tolerance.
+- Repository/package version **0.43.0** does not rewrite the frozen v0.35 controlled bundle, reporting data-product version **0.40.0**, or response schemas **1.0 / 1.1**.
 - `InvoiceDate` is event time, not ingestion time. Real-data late-arrival, watermark, processing-time SLA and point-in-time/as-of reconstruction are not claimed.
-- v0.42 is controlled selective-revalidation evidence over a declared 16-node graph; it is not a production lineage scheduler, workflow engine or distributed build system.
-- The v0.35 DAU semantic proposal remains WITHHOLD as a silent replacement. Explicit versioned adoption is a separate governance event, not a post-hoc relaxation of the 1% compatibility tolerance.
-- Repository/package version **0.42.0** does not rewrite the frozen v0.35 controlled bundle, reporting data-product version **0.40.0**, or response schemas **1.0 / 1.1**.
-- The reporting layer is a local Python/CLI data-product boundary, not a deployed network service.
-- v0.40 proves request-local query execution and deterministic concurrent replay on one process / one node; it does not prove production QPS, tail latency, distributed isolation, fairness or capacity.
-- The 96% reporting figure is metric-partition-selection reduction for one pinned query, not source-row reduction or latency speedup.
-- Forecast thresholds were frozen before external evaluation; failed gates are reported rather than retuned away.
-- Shared GitHub-runner timings are diagnostic only. Public operational claims use deterministic rows/partitions/hashes and exact parity.
+- Shared GitHub-runner timings are diagnostic only. Public operational claims use deterministic rows, partitions, hashes and exact parity.
 
 The progression is:
 
@@ -355,8 +274,10 @@ trust the source
 → govern schema and metric changes
 → invalidate stale downstream evidence selectively
 → explicitly adopt new semantics when intended
-→ selectively rebuild only affected evidence
-→ independently require the graph to become fully fresh
+→ selectively rebuild affected evidence
+→ correct late-discovered source facts by stable identity
+→ supersede published decisions instead of overwriting history
+→ require selective replay to equal a clean rebuild
 → validate on external real data
 → update incrementally and recover exactly
 → expose a bounded reporting product
