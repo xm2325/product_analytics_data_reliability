@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from hashlib import sha256
 from typing import Iterable
 
@@ -14,13 +13,11 @@ SUPERSEDED = "SUPERSEDED"
 ACTIVE = "ACTIVE"
 ACTIVE_UNCHANGED = "ACTIVE_UNCHANGED"
 SOURCE_DATA_CORRECTION = "SOURCE_DATA_CORRECTION"
-
-
-@dataclass(frozen=True)
-class IncidentWork:
-    patched_events: int
-    affected_product_days: int
-    gold_rows_recomputed: int
+_RATIO_COLUMNS = {
+    "dau_definition_delta_pct",
+    "conversion_first_open",
+    "conversion_trial_start",
+}
 
 
 def _required(frame: pd.DataFrame, columns: Iterable[str], *, label: str) -> None:
@@ -30,7 +27,6 @@ def _required(frame: pd.DataFrame, columns: Iterable[str], *, label: str) -> Non
 
 
 def frame_sha256(frame: pd.DataFrame, *, sort_by: Iterable[str]) -> str:
-    """Stable SHA-256 for tabular evidence, including frames with missing values."""
     ordered = frame.copy().sort_values(list(sort_by)).reset_index(drop=True)
     for column in ordered.columns:
         if pd.api.types.is_datetime64_any_dtype(ordered[column]):
@@ -48,17 +44,8 @@ def inject_product_routing_incident(
     start_date: object,
     end_date: object,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Inject a schema-valid routing incident and return its exact correction ledger.
-
-    Every matching event is relabelled to another already-valid product. No row is
-    duplicated, removed or made contract-invalid, so row-level quality gates cannot
-    discover the business-routing error by themselves.
-    """
-    _required(
-        certified_events,
-        ("event_id", "product", "event_type", "event_ts"),
-        label="certified events",
-    )
+    """Inject a schema-valid product-routing error and return its correction ledger."""
+    _required(certified_events, ("event_id", "product", "event_type", "event_ts"), label="certified events")
     if source_product == incident_product:
         raise ValueError("source_product and incident_product must differ")
     if certified_events["event_id"].duplicated().any():
@@ -70,8 +57,7 @@ def inject_product_routing_incident(
         raise ValueError("end_date must be on or after start_date")
 
     out = certified_events.copy()
-    event_ts = pd.to_datetime(out["event_ts"], utc=True, errors="raise")
-    event_date = event_ts.dt.date
+    event_date = pd.to_datetime(out["event_ts"], utc=True, errors="raise").dt.date
     mask = (
         out["product"].eq(source_product)
         & out["event_type"].eq(event_type)
@@ -81,20 +67,14 @@ def inject_product_routing_incident(
     if not mask.any():
         raise ValueError("incident selector matched no certified events")
 
-    patch = out.loc[mask, ["event_id", "event_type", "event_ts"]].copy()
+    patch = out.loc[mask, ["event_id", "event_ts", "event_type"]].copy()
     patch["event_date"] = event_date.loc[mask].astype(str).to_numpy()
     patch["original_product"] = source_product
     patch["incident_product"] = incident_product
-    patch = patch[
-        [
-            "event_id",
-            "event_ts",
-            "event_date",
-            "event_type",
-            "original_product",
-            "incident_product",
-        ]
-    ].sort_values("event_id").reset_index(drop=True)
+    patch = patch[[
+        "event_id", "event_ts", "event_date", "event_type",
+        "original_product", "incident_product",
+    ]].sort_values("event_id").reset_index(drop=True)
     if patch["event_id"].duplicated().any():
         raise AssertionError("incident patch ledger contains duplicate event ids")
 
@@ -106,21 +86,11 @@ def apply_product_routing_correction(
     incident_events: pd.DataFrame,
     correction_ledger: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Restore product labels by event_id, failing closed on stale/tampered patches."""
-    _required(
-        incident_events,
-        ("event_id", "product", "event_type", "event_ts"),
-        label="incident events",
-    )
+    """Restore product labels by event_id and reject stale/tampered corrections."""
+    _required(incident_events, ("event_id", "product", "event_type", "event_ts"), label="incident events")
     _required(
         correction_ledger,
-        (
-            "event_id",
-            "event_type",
-            "event_date",
-            "original_product",
-            "incident_product",
-        ),
+        ("event_id", "event_type", "event_date", "original_product", "incident_product"),
         label="correction ledger",
     )
     if incident_events["event_id"].duplicated().any():
@@ -139,39 +109,24 @@ def apply_product_routing_correction(
     patch["event_id"] = patch["event_id"].astype(str)
     lookup = out[["event_id", "product", "event_type", "event_ts"]].copy()
     lookup["event_id"] = lookup["event_id"].astype(str)
-    joined = patch.merge(
-        lookup,
-        on="event_id",
-        how="left",
-        validate="one_to_one",
-        suffixes=("_patch", "_observed"),
-    )
+    joined = patch.merge(lookup, on="event_id", how="left", validate="one_to_one", suffixes=("_patch", "_observed"))
 
-    product_mismatch = ~joined["product"].astype(str).eq(joined["incident_product"].astype(str))
-    type_mismatch = ~joined["event_type_observed"].astype(str).eq(
-        joined["event_type_patch"].astype(str)
-    )
-    observed_dates = (
-        pd.to_datetime(joined["event_ts_observed"], utc=True, errors="raise")
-        .dt.date.astype(str)
-    )
-    date_mismatch = ~observed_dates.eq(joined["event_date"].astype(str))
-    if product_mismatch.any() or type_mismatch.any() or date_mismatch.any():
+    bad_product = ~joined["product"].astype(str).eq(joined["incident_product"].astype(str))
+    bad_type = ~joined["event_type_observed"].astype(str).eq(joined["event_type_patch"].astype(str))
+    observed_date = pd.to_datetime(joined["event_ts_observed"], utc=True, errors="raise").dt.date.astype(str)
+    bad_date = ~observed_date.eq(joined["event_date"].astype(str))
+    if bad_product.any() or bad_type.any() or bad_date.any():
         raise ValueError("correction ledger no longer matches the incident event state")
 
     restore = patch.set_index("event_id")["original_product"].astype(str).to_dict()
-    ids_series = out["event_id"].astype(str)
-    affected = ids_series.isin(ids)
-    out.loc[affected, "product"] = ids_series.loc[affected].map(restore).to_numpy()
+    event_ids = out["event_id"].astype(str)
+    affected = event_ids.isin(ids)
+    out.loc[affected, "product"] = event_ids.loc[affected].map(restore).to_numpy()
     return out
 
 
 def affected_product_dates(correction_ledger: pd.DataFrame) -> pd.DataFrame:
-    _required(
-        correction_ledger,
-        ("event_date", "original_product", "incident_product"),
-        label="correction ledger",
-    )
+    _required(correction_ledger, ("event_date", "original_product", "incident_product"), label="correction ledger")
     source = correction_ledger[["event_date", "original_product"]].rename(
         columns={"event_date": "date", "original_product": "product"}
     )
@@ -183,27 +138,24 @@ def affected_product_dates(correction_ledger: pd.DataFrame) -> pd.DataFrame:
     return out.sort_values(["product", "date"]).reset_index(drop=True)
 
 
-def _coerce_gold_schema(frame: pd.DataFrame, template: pd.DataFrame) -> pd.DataFrame:
-    """Restore the published Gold dtypes after stitching partial aggregates.
-
-    A partial slice can contain missing ratio values where the full table contains
-    ordinary NumPy floats. Pandas may therefore promote only the replacement slice
-    (and then the concatenated result) to object dtype. Selective repair must not
-    create a schema drift that a clean full rebuild would not create.
-    """
+def _normalise_gold_dtypes(frame: pd.DataFrame, template: pd.DataFrame) -> pd.DataFrame:
+    """Mirror the existing daily_metrics dtype behaviour after partial stitching."""
     out = frame.copy()
     for column in template.columns:
+        if column in _RATIO_COLUMNS:
+            numeric = pd.to_numeric(out[column], errors="coerce")
+            if numeric.isna().any():
+                values = numeric.astype(object)
+                values.loc[numeric.isna()] = pd.NA
+                out[column] = values
+            else:
+                out[column] = numeric.astype(float)
+            continue
         target_dtype = template[column].dtype
         if pd.api.types.is_numeric_dtype(target_dtype):
             out[column] = pd.to_numeric(out[column], errors="coerce").astype(target_dtype)
-        elif column != "date":
-            try:
-                out[column] = out[column].astype(target_dtype)
-            except (TypeError, ValueError):
-                # Object-backed dimensions intentionally keep their values without
-                # inventing a new categorical/string contract.
-                if str(target_dtype) != "object":
-                    raise
+        elif column != "date" and str(target_dtype) != "object":
+            out[column] = out[column].astype(target_dtype)
     return out
 
 
@@ -229,9 +181,7 @@ def selective_recompute_gold(
         raise ValueError("affected product-date set is empty")
 
     events = corrected_events.copy()
-    events["_event_date"] = pd.to_datetime(
-        events["event_ts"], utc=True, errors="raise"
-    ).dt.date
+    events["_event_date"] = pd.to_datetime(events["event_ts"], utc=True, errors="raise").dt.date
     event_keys = list(zip(events["product"].astype(str), events["_event_date"]))
     subset = events.loc[[key in keys for key in event_keys]].drop(columns=["_event_date"])
     if subset.empty:
@@ -239,7 +189,6 @@ def selective_recompute_gold(
 
     recomputed = daily_metrics(subset)
     recomputed["date"] = pd.to_datetime(recomputed["date"], errors="raise").dt.date
-    recomputed = _coerce_gold_schema(recomputed[gold.columns], gold)
     recomputed_keys = set(zip(recomputed["product"].astype(str), recomputed["date"]))
     if recomputed_keys != keys:
         missing = sorted(keys - recomputed_keys)
@@ -248,12 +197,16 @@ def selective_recompute_gold(
 
     gold_keys = list(zip(gold["product"].astype(str), gold["date"]))
     untouched = gold.loc[[key not in keys for key in gold_keys]]
-    result = pd.concat([untouched, recomputed], ignore_index=True)
-    result = _coerce_gold_schema(result, gold)
+    result = pd.concat([untouched, recomputed[gold.columns]], ignore_index=True)
+    result = _normalise_gold_dtypes(result, gold)
     result = result.sort_values(["product", "date"]).reset_index(drop=True)
     if len(result) != len(gold) or result.duplicated(["product", "date"]).any():
         raise AssertionError("selective Gold replay changed the product-date key set")
-    return result, recomputed.sort_values(["product", "date"]).reset_index(drop=True)
+
+    recomputed_out = result.loc[
+        [key in keys for key in zip(result["product"].astype(str), result["date"])]
+    ].reset_index(drop=True)
+    return result, recomputed_out
 
 
 def _as_bool(value: object) -> bool:
@@ -271,12 +224,7 @@ def build_decision_supersession_ledger(
     incident_forecasts: pd.DataFrame,
     corrected_forecasts: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Version planning decisions whenever their forecast evidence changed.
-
-    A published decision is superseded when its evidence fingerprint changes even
-    if the resulting action happens to be identical. Unaffected decisions are
-    retained without fabricating a replacement version.
-    """
+    """Supersede a published decision whenever its forecast evidence changes."""
     _required(incident_forecasts, ("metric", "approved"), label="incident forecasts")
     _required(corrected_forecasts, ("metric", "approved"), label="corrected forecasts")
     incident = incident_forecasts.sort_values("metric").reset_index(drop=True)
@@ -285,9 +233,7 @@ def build_decision_supersession_ledger(
         raise ValueError("incident/corrected forecast metric sets differ")
 
     rows: list[dict[str, object]] = []
-    for incident_row, corrected_row in zip(
-        incident.to_dict(orient="records"), corrected.to_dict(orient="records")
-    ):
+    for incident_row, corrected_row in zip(incident.to_dict(orient="records"), corrected.to_dict(orient="records")):
         metric = str(incident_row["metric"])
         incident_fp = canonical_sha256(incident_row)
         corrected_fp = canonical_sha256(corrected_row)
@@ -298,52 +244,46 @@ def build_decision_supersession_ledger(
         old_id = f"{metric}|incident"
 
         if not evidence_changed:
-            rows.append(
-                {
-                    "decision_id": old_id,
-                    "metric": metric,
-                    "evidence_state": "incident_published",
-                    "action": incident_action,
-                    "evidence_sha256": incident_fp,
-                    "status": ACTIVE_UNCHANGED,
-                    "superseded_by": "",
-                    "supersedes": "",
-                    "supersession_reason": "",
-                    "evidence_changed": False,
-                    "action_changed": False,
-                }
-            )
-            continue
-
-        new_id = f"{metric}|corrected"
-        rows.append(
-            {
+            rows.append({
                 "decision_id": old_id,
                 "metric": metric,
                 "evidence_state": "incident_published",
                 "action": incident_action,
                 "evidence_sha256": incident_fp,
-                "status": SUPERSEDED,
-                "superseded_by": new_id,
-                "supersedes": "",
-                "supersession_reason": SOURCE_DATA_CORRECTION,
-                "evidence_changed": True,
-                "action_changed": action_changed,
-            }
-        )
-        rows.append(
-            {
-                "decision_id": new_id,
-                "metric": metric,
-                "evidence_state": "corrected_replay",
-                "action": corrected_action,
-                "evidence_sha256": corrected_fp,
-                "status": ACTIVE,
+                "status": ACTIVE_UNCHANGED,
                 "superseded_by": "",
-                "supersedes": old_id,
-                "supersession_reason": SOURCE_DATA_CORRECTION,
-                "evidence_changed": True,
-                "action_changed": action_changed,
-            }
-        )
+                "supersedes": "",
+                "supersession_reason": "",
+                "evidence_changed": False,
+                "action_changed": False,
+            })
+            continue
+
+        new_id = f"{metric}|corrected"
+        rows.append({
+            "decision_id": old_id,
+            "metric": metric,
+            "evidence_state": "incident_published",
+            "action": incident_action,
+            "evidence_sha256": incident_fp,
+            "status": SUPERSEDED,
+            "superseded_by": new_id,
+            "supersedes": "",
+            "supersession_reason": SOURCE_DATA_CORRECTION,
+            "evidence_changed": True,
+            "action_changed": action_changed,
+        })
+        rows.append({
+            "decision_id": new_id,
+            "metric": metric,
+            "evidence_state": "corrected_replay",
+            "action": corrected_action,
+            "evidence_sha256": corrected_fp,
+            "status": ACTIVE,
+            "superseded_by": "",
+            "supersedes": old_id,
+            "supersession_reason": SOURCE_DATA_CORRECTION,
+            "evidence_changed": True,
+            "action_changed": action_changed,
+        })
     return pd.DataFrame(rows)
