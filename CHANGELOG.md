@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.42.0
+
+- closed the v0.41 stale-evidence loop with **selective evidence revalidation** rather than another forecasting model, framework or dashboard;
+- introduced governed revalidation states `NOOP`, `BLOCKED_EXPLICIT_ADOPTION_REQUIRED`, `BLOCKED_PRODUCER_INCOMPATIBLE`, `READY` and `REVALIDATED`, with partial replacement evidence rejected rather than tolerated;
+- preserved the frozen v0.35 decision that broadening DAU to any certified event is **WITHHOLD as a silent replacement**; v0.42 does not relax the 1% semantic compatibility tolerance or reinterpret that historical decision;
+- modelled a separate explicit, versioned DAU semantic adoption and rebuilt only its eight stale lineage nodes: `semantic:dau`, `metric:dau`, three DAU forecasts and three DAU planning decisions;
+- recomputed **450 Gold product-day metric rows**, **3 rolling-origin DAU forecast series** and **3 planning decisions**, while recomputing **0 pricing-chain nodes**;
+- required the other **8 / 16** DAG nodes to be reused exactly, including producer shape, revenue/paid semantic and metric evidence, pricing experiment, impact and rollout authorisation;
+- independently verified that the explicit semantic adoption moves the graph from **8 stale / 8 fresh** to **0 stale / 16 fresh**, while the silent semantic replacement remains blocked with 8 stale nodes;
+- kept the required `event_id -> event_uuid` producer break **BLOCKED_PRODUCER_INCOMPATIBLE** with 13 stale nodes, because downstream recomputation cannot compensate for an unresolved producer contract break;
+- rebuilt the candidate DAU forecast evidence from the frozen Gold/Silver layers and cross-checked it against the separately validated v0.35 migration replay: `file_transfer` 5.53% WAPE APPROVE, `notes_app` 4.06% APPROVE, and `photo_editor` 3.77% WITHHOLD because its 2.46% last-value benchmark remains better;
+- added `evidence_revalidation.py`, four v0.42 evidence artefacts, five focused unit tests and `validate_evidence_revalidation_reference.py`, whose validation path does not import the production revalidation planner;
+- pinned only deterministic work counts and exact reuse/freshness results; no shared-runner latency, QPS, throughput or speedup claim is made;
+- advanced repository/package/runtime metadata to **0.42.0** while leaving the frozen v0.35 controlled bundle, reporting data-product version **0.40.0** and response schemas **1.0 / 1.1** unchanged;
+- advanced the full repository suite from **106 to 111 tests**.
+
 ## v0.41.0
 
 - added **selective downstream evidence invalidation** over the frozen v0.35 controlled decision bundle rather than silently rewriting historical reference evidence;
@@ -88,7 +104,7 @@
 - pinned the accepted source archive at **45,622,418 bytes / SHA-256 `572e36277c2390fbfde10664750731e0a86f55e33470d91919085f0408e67bfb`** and the extracted workbook at **45,622,278 bytes / SHA-256 `bcbe73b35f5b7babf197fb0cb983a11f5d9ff929078d4aa53d171b1f2df2e980`** so upstream replacement requires explicit review;
 - mapped **1,067,371** source rows to one canonical transaction representation and added real-data quality, metric semantics and frozen forecast validation;
 - fixed a real-data portability bug where anonymous-only purchase days produced `NaN` active customers, representing them correctly as **0 identifiable active customers**;
-- tested two semantic replacements against the declared 1% compatibility tolerance: signed transaction value moves purchase revenue by **-8.04%** and any-transaction customer population moves purchasing-customer population by **+1.09%**, so both are withheld as silent drop-ins;
+- tested two semantic replacements against the declared 1% compatibility tolerance: signed transaction value moves purchase revenue by **-8.04%** and any-transaction customer population changes the purchasing-customer population by **+1.09%**, so both are withheld as silent drop-ins;
 - reused the frozen v0.35 forecast contract without post-hoc tuning; **0/4** external forecast metrics are planning-approved, including the useful `orders` boundary case with **15.31% WAPE** but **20.94% MAPE** above the frozen 20% gate;
 - added independent DuckDB/Python real-data reconstruction and checked-in public claim validation;
 - explicitly refused to claim real-data late-arrival/watermark validation because UCI Online Retail II exposes invoice/event time but no separate ingestion timestamp;
