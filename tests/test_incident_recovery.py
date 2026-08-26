@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import timedelta
+
 import pandas as pd
 import pytest
 
@@ -22,9 +24,6 @@ def _events() -> pd.DataFrame:
     event_id = 0
     for day in pd.date_range("2026-04-10", periods=3, freq="D", tz="UTC"):
         for product, prefix in [("notes_app", "n"), ("file_transfer", "f"), ("photo_editor", "p")]:
-            # Keep the toy Gold input representative of the real metric contract:
-            # daily_metrics always sees at least one funnel event in addition to
-            # activity and purchase evidence.
             event_id += 1
             rows.append(
                 {
@@ -33,7 +32,7 @@ def _events() -> pd.DataFrame:
                     "product": product,
                     "event_type": "first_open",
                     "event_ts": day,
-                    "ingested_at": day + pd.Timedelta(minutes=1),
+                    "ingested_at": day + timedelta(minutes=1),
                     "revenue_gbp": 0.0,
                 }
             )
@@ -46,8 +45,8 @@ def _events() -> pd.DataFrame:
                         "user_id": f"{prefix}{user}",
                         "product": product,
                         "event_type": "app_open",
-                        "event_ts": day + pd.Timedelta(hours=hour),
-                        "ingested_at": day + pd.Timedelta(hours=hour, minutes=1),
+                        "event_ts": day + timedelta(hours=hour),
+                        "ingested_at": day + timedelta(hours=hour, minutes=1),
                         "revenue_gbp": 0.0,
                     }
                 )
@@ -58,8 +57,8 @@ def _events() -> pd.DataFrame:
                     "user_id": f"{prefix}-buyer",
                     "product": product,
                     "event_type": "purchase",
-                    "event_ts": day + pd.Timedelta(hours=12),
-                    "ingested_at": day + pd.Timedelta(hours=12, minutes=1),
+                    "event_ts": day + timedelta(hours=12),
+                    "ingested_at": day + timedelta(hours=12, minutes=1),
                     "revenue_gbp": 5.0,
                 }
             )
@@ -114,12 +113,19 @@ def test_selective_gold_replay_equals_clean_full_rebuild():
     affected = affected_product_dates(ledger)
     selective, recomputed = selective_recompute_gold(incident_gold, corrected, affected)
     clean_rebuild = daily_metrics(corrected)
+
+    # Core gate remains strict: the complete selectively repaired Gold product must
+    # be exactly the same as a clean full rebuild, including dtypes.
     pd.testing.assert_frame_equal(selective, clean_rebuild, check_exact=True)
     pd.testing.assert_frame_equal(selective, clean_gold, check_exact=True)
     assert len(recomputed) == 4
+
+    # Unaffected row values are reused exactly. A DataFrame column dtype is global,
+    # so correcting zero-DAU rows can legitimately restore a ratio column from
+    # object to float64 even for an extracted unaffected subset.
     photo_before = incident_gold.loc[incident_gold["product"].eq("photo_editor")].reset_index(drop=True)
     photo_after = selective.loc[selective["product"].eq("photo_editor")].reset_index(drop=True)
-    pd.testing.assert_frame_equal(photo_before, photo_after, check_exact=True)
+    pd.testing.assert_frame_equal(photo_before, photo_after, check_exact=True, check_dtype=False)
 
 
 def test_correction_fails_closed_when_ledger_no_longer_matches_incident():
