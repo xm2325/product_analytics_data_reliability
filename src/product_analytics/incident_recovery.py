@@ -139,11 +139,22 @@ def apply_product_routing_correction(
     patch["event_id"] = patch["event_id"].astype(str)
     lookup = out[["event_id", "product", "event_type", "event_ts"]].copy()
     lookup["event_id"] = lookup["event_id"].astype(str)
-    joined = patch.merge(lookup, on="event_id", how="left", validate="one_to_one", suffixes=("_patch", "_observed"))
+    joined = patch.merge(
+        lookup,
+        on="event_id",
+        how="left",
+        validate="one_to_one",
+        suffixes=("_patch", "_observed"),
+    )
 
     product_mismatch = ~joined["product"].astype(str).eq(joined["incident_product"].astype(str))
-    type_mismatch = ~joined["event_type_observed"].astype(str).eq(joined["event_type_patch"].astype(str))
-    observed_dates = pd.to_datetime(joined["event_ts_observed"], utc=True, errors="raise").dt.date.astype(str)
+    type_mismatch = ~joined["event_type_observed"].astype(str).eq(
+        joined["event_type_patch"].astype(str)
+    )
+    observed_dates = (
+        pd.to_datetime(joined["event_ts_observed"], utc=True, errors="raise")
+        .dt.date.astype(str)
+    )
     date_mismatch = ~observed_dates.eq(joined["event_date"].astype(str))
     if product_mismatch.any() or type_mismatch.any() or date_mismatch.any():
         raise ValueError("correction ledger no longer matches the incident event state")
@@ -172,6 +183,30 @@ def affected_product_dates(correction_ledger: pd.DataFrame) -> pd.DataFrame:
     return out.sort_values(["product", "date"]).reset_index(drop=True)
 
 
+def _coerce_gold_schema(frame: pd.DataFrame, template: pd.DataFrame) -> pd.DataFrame:
+    """Restore the published Gold dtypes after stitching partial aggregates.
+
+    A partial slice can contain missing ratio values where the full table contains
+    ordinary NumPy floats. Pandas may therefore promote only the replacement slice
+    (and then the concatenated result) to object dtype. Selective repair must not
+    create a schema drift that a clean full rebuild would not create.
+    """
+    out = frame.copy()
+    for column in template.columns:
+        target_dtype = template[column].dtype
+        if pd.api.types.is_numeric_dtype(target_dtype):
+            out[column] = pd.to_numeric(out[column], errors="coerce").astype(target_dtype)
+        elif column != "date":
+            try:
+                out[column] = out[column].astype(target_dtype)
+            except (TypeError, ValueError):
+                # Object-backed dimensions intentionally keep their values without
+                # inventing a new categorical/string contract.
+                if str(target_dtype) != "object":
+                    raise
+    return out
+
+
 def selective_recompute_gold(
     incident_gold: pd.DataFrame,
     corrected_events: pd.DataFrame,
@@ -194,7 +229,9 @@ def selective_recompute_gold(
         raise ValueError("affected product-date set is empty")
 
     events = corrected_events.copy()
-    events["_event_date"] = pd.to_datetime(events["event_ts"], utc=True, errors="raise").dt.date
+    events["_event_date"] = pd.to_datetime(
+        events["event_ts"], utc=True, errors="raise"
+    ).dt.date
     event_keys = list(zip(events["product"].astype(str), events["_event_date"]))
     subset = events.loc[[key in keys for key in event_keys]].drop(columns=["_event_date"])
     if subset.empty:
@@ -202,6 +239,7 @@ def selective_recompute_gold(
 
     recomputed = daily_metrics(subset)
     recomputed["date"] = pd.to_datetime(recomputed["date"], errors="raise").dt.date
+    recomputed = _coerce_gold_schema(recomputed[gold.columns], gold)
     recomputed_keys = set(zip(recomputed["product"].astype(str), recomputed["date"]))
     if recomputed_keys != keys:
         missing = sorted(keys - recomputed_keys)
@@ -210,7 +248,8 @@ def selective_recompute_gold(
 
     gold_keys = list(zip(gold["product"].astype(str), gold["date"]))
     untouched = gold.loc[[key not in keys for key in gold_keys]]
-    result = pd.concat([untouched, recomputed[gold.columns]], ignore_index=True)
+    result = pd.concat([untouched, recomputed], ignore_index=True)
+    result = _coerce_gold_schema(result, gold)
     result = result.sort_values(["product", "date"]).reset_index(drop=True)
     if len(result) != len(gold) or result.duplicated(["product", "date"]).any():
         raise AssertionError("selective Gold replay changed the product-date key set")
