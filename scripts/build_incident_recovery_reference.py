@@ -44,6 +44,25 @@ def _normalise_gold(frame: pd.DataFrame) -> pd.DataFrame:
     return out.sort_values(["product", "date"]).reset_index(drop=True)
 
 
+def _assert_frozen_gold_equivalent(current: pd.DataFrame, frozen: pd.DataFrame) -> None:
+    """Compare recomputed Gold with a CSV round-trip without weakening replay parity."""
+    left = _normalise_gold(current)
+    right = _normalise_gold(frozen)
+    if list(left.columns) != list(right.columns) or len(left) != len(right):
+        raise AssertionError("frozen Gold shape differs from clean recomputation")
+    for column in ("product", "date"):
+        if not left[column].equals(right[column]):
+            raise AssertionError(f"frozen Gold key column differs: {column}")
+    for column in [name for name in left.columns if name not in {"product", "date"}]:
+        a = pd.to_numeric(left[column], errors="coerce")
+        b = pd.to_numeric(right[column], errors="coerce")
+        if not a.isna().equals(b.isna()):
+            raise AssertionError(f"frozen Gold null pattern differs: {column}")
+        present = a.notna()
+        if ((a.loc[present] - b.loc[present]).abs() > 1e-12).any():
+            raise AssertionError(f"frozen Gold values differ beyond CSV tolerance: {column}")
+
+
 def _dau_forecasts(
     gold: pd.DataFrame,
     silver: pd.DataFrame,
@@ -86,12 +105,13 @@ def _changed_gold_rows(incident_gold: pd.DataFrame, corrected_gold: pd.DataFrame
         right[["product", "date"]].itertuples(index=False, name=None)
     ):
         raise AssertionError("incident and corrected Gold key sets differ")
-    changed = pd.Series(False, index=left.index)
+    changed = pd.Series(False, index=left.index, dtype=bool)
     for column in [name for name in left.columns if name not in {"product", "date"}]:
         a = left[column]
         b = right[column]
-        equal = a.eq(b) | (a.isna() & b.isna())
-        changed = changed | ~equal
+        equal_values = a.eq(b).fillna(False)
+        equal = equal_values | (a.isna() & b.isna())
+        changed = changed | ~equal.astype(bool)
     keys = left.loc[changed, ["product", "date"]].copy()
     out = keys.copy()
     for column in ["dau", "dau_legacy_any_event"]:
@@ -164,16 +184,7 @@ def build_reference(base_dir: Path, output_dir: Path) -> dict[str, object]:
     selective_gold = _normalise_gold(selective_gold)
     clean_full_rebuild = _normalise_gold(daily_metrics(corrected_silver))
     pd.testing.assert_frame_equal(selective_gold, clean_full_rebuild, check_exact=True)
-    # Frozen CSV artifacts have already crossed a decimal text serialization boundary.
-    # Keep the replay-vs-clean gate exact above, but allow only round-trip noise here.
-    pd.testing.assert_frame_equal(
-        clean_full_rebuild,
-        clean_gold,
-        check_exact=False,
-        rtol=0.0,
-        atol=1e-12,
-        check_dtype=False,
-    )
+    _assert_frozen_gold_equivalent(clean_full_rebuild, clean_gold)
 
     changed_gold = _changed_gold_rows(incident_gold, clean_full_rebuild)
     affected_keys = set(zip(affected["product"].astype(str), affected["date"]))
