@@ -203,7 +203,16 @@ def validate(base_dir: Path, output_dir: Path) -> None:
 
     incident_gold = _daily_metrics(incident_silver)
     corrected_full_gold = _daily_metrics(corrected_silver)
-    pd.testing.assert_frame_equal(corrected_full_gold, clean_gold, check_exact=True, check_dtype=False)
+    # The frozen Gold CSV has crossed a decimal text serialization boundary.
+    # Permit only round-trip floating-point noise here; targeted parity stays exact below.
+    pd.testing.assert_frame_equal(
+        corrected_full_gold,
+        clean_gold,
+        check_exact=False,
+        rtol=0.0,
+        atol=1e-12,
+        check_dtype=False,
+    )
 
     affected = pd.read_csv(output_dir / "incident_affected_product_dates.csv")
     affected["date"] = pd.to_datetime(affected["date"], errors="raise").dt.date
