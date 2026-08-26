@@ -164,7 +164,16 @@ def build_reference(base_dir: Path, output_dir: Path) -> dict[str, object]:
     selective_gold = _normalise_gold(selective_gold)
     clean_full_rebuild = _normalise_gold(daily_metrics(corrected_silver))
     pd.testing.assert_frame_equal(selective_gold, clean_full_rebuild, check_exact=True)
-    pd.testing.assert_frame_equal(clean_full_rebuild, clean_gold, check_exact=True, check_dtype=False)
+    # Frozen CSV artifacts have already crossed a decimal text serialization boundary.
+    # Keep the replay-vs-clean gate exact above, but allow only round-trip noise here.
+    pd.testing.assert_frame_equal(
+        clean_full_rebuild,
+        clean_gold,
+        check_exact=False,
+        rtol=0.0,
+        atol=1e-12,
+        check_dtype=False,
+    )
 
     changed_gold = _changed_gold_rows(incident_gold, clean_full_rebuild)
     affected_keys = set(zip(affected["product"].astype(str), affected["date"]))
