@@ -107,11 +107,10 @@ def _changed_gold_rows(incident_gold: pd.DataFrame, corrected_gold: pd.DataFrame
         raise AssertionError("incident and corrected Gold key sets differ")
     changed = pd.Series(False, index=left.index, dtype=bool)
     for column in [name for name in left.columns if name not in {"product", "date"}]:
-        a = left[column]
-        b = right[column]
-        equal_values = a.eq(b).fillna(False)
-        equal = equal_values | (a.isna() & b.isna())
-        changed = changed | ~equal.astype(bool)
+        a = pd.to_numeric(left[column], errors="coerce")
+        b = pd.to_numeric(right[column], errors="coerce")
+        equal = a.eq(b) | (a.isna() & b.isna())
+        changed = changed | ~equal
     keys = left.loc[changed, ["product", "date"]].copy()
     out = keys.copy()
     for column in ["dau", "dau_legacy_any_event"]:
@@ -259,41 +258,13 @@ def build_reference(base_dir: Path, output_dir: Path) -> dict[str, object]:
         "version": VERSION,
         "incident_root": "source:routing:notes_app_app_open",
         "nodes": [
-            {
-                "node_id": "source:routing:notes_app_app_open",
-                "kind": "source_incident",
-                "dependencies": [],
-            },
-            {
-                "node_id": "metric:file_transfer:dau",
-                "kind": "certified_metric",
-                "dependencies": ["source:routing:notes_app_app_open"],
-            },
-            {
-                "node_id": "metric:notes_app:dau",
-                "kind": "certified_metric",
-                "dependencies": ["source:routing:notes_app_app_open"],
-            },
-            {
-                "node_id": "forecast:file_transfer:dau",
-                "kind": "forecast_evidence",
-                "dependencies": ["metric:file_transfer:dau"],
-            },
-            {
-                "node_id": "forecast:notes_app:dau",
-                "kind": "forecast_evidence",
-                "dependencies": ["metric:notes_app:dau"],
-            },
-            {
-                "node_id": "planning:file_transfer:dau",
-                "kind": "planning_decision",
-                "dependencies": ["forecast:file_transfer:dau"],
-            },
-            {
-                "node_id": "planning:notes_app:dau",
-                "kind": "planning_decision",
-                "dependencies": ["forecast:notes_app:dau"],
-            },
+            {"node_id": "source:routing:notes_app_app_open", "kind": "source_incident", "dependencies": []},
+            {"node_id": "metric:file_transfer:dau", "kind": "certified_metric", "dependencies": ["source:routing:notes_app_app_open"]},
+            {"node_id": "metric:notes_app:dau", "kind": "certified_metric", "dependencies": ["source:routing:notes_app_app_open"]},
+            {"node_id": "forecast:file_transfer:dau", "kind": "forecast_evidence", "dependencies": ["metric:file_transfer:dau"]},
+            {"node_id": "forecast:notes_app:dau", "kind": "forecast_evidence", "dependencies": ["metric:notes_app:dau"]},
+            {"node_id": "planning:file_transfer:dau", "kind": "planning_decision", "dependencies": ["forecast:file_transfer:dau"]},
+            {"node_id": "planning:notes_app:dau", "kind": "planning_decision", "dependencies": ["forecast:notes_app:dau"]},
         ],
         "unaffected_decision": "planning:photo_editor:dau",
     }
@@ -301,37 +272,33 @@ def build_reference(base_dir: Path, output_dir: Path) -> dict[str, object]:
 
     total_gold_rows = int(len(incident_gold))
     gold_rows_recomputed = int(len(recomputed_gold))
-    summary = pd.DataFrame(
-        [
-            {
-                "version": VERSION,
-                "incident_type": "schema_valid_product_routing_error",
-                "source_product": SOURCE_PRODUCT,
-                "incident_product": INCIDENT_PRODUCT,
-                "event_type": INCIDENT_EVENT_TYPE,
-                "incident_start": str(start_date),
-                "incident_end": str(end_date),
-                "incident_days": len(incident_dates),
-                "patched_events": len(correction_ledger),
-                "row_level_quality_rejects": incident_quality.rows_rejected,
-                "affected_products": len(affected_products),
-                "affected_product_days": len(affected),
-                "changed_gold_product_days": len(changed_gold),
-                "total_gold_rows": total_gold_rows,
-                "selective_gold_rows_recomputed": gold_rows_recomputed,
-                "gold_rows_not_recomputed": total_gold_rows - gold_rows_recomputed,
-                "gold_recompute_reduction_fraction": 1.0 - gold_rows_recomputed / total_gold_rows,
-                "forecast_series_recomputed": len(rebuilt_forecasts),
-                "forecast_series_reused": len(unaffected_products),
-                "superseded_decisions": len(superseded),
-                "action_changed_decisions": len(action_changes),
-                "retained_decisions": len(retained),
-                "targeted_gold_equals_clean_rebuild": True,
-                "targeted_forecasts_equal_clean_rebuild": True,
-                "corrected_silver_equals_clean_source": True,
-            }
-        ]
-    )
+    summary = pd.DataFrame([{
+        "version": VERSION,
+        "incident_type": "schema_valid_product_routing_error",
+        "source_product": SOURCE_PRODUCT,
+        "incident_product": INCIDENT_PRODUCT,
+        "event_type": INCIDENT_EVENT_TYPE,
+        "incident_start": str(start_date),
+        "incident_end": str(end_date),
+        "incident_days": len(incident_dates),
+        "patched_events": len(correction_ledger),
+        "row_level_quality_rejects": incident_quality.rows_rejected,
+        "affected_products": len(affected_products),
+        "affected_product_days": len(affected),
+        "changed_gold_product_days": len(changed_gold),
+        "total_gold_rows": total_gold_rows,
+        "selective_gold_rows_recomputed": gold_rows_recomputed,
+        "gold_rows_not_recomputed": total_gold_rows - gold_rows_recomputed,
+        "gold_recompute_reduction_fraction": 1.0 - gold_rows_recomputed / total_gold_rows,
+        "forecast_series_recomputed": len(rebuilt_forecasts),
+        "forecast_series_reused": len(unaffected_products),
+        "superseded_decisions": len(superseded),
+        "action_changed_decisions": len(action_changes),
+        "retained_decisions": len(retained),
+        "targeted_gold_equals_clean_rebuild": True,
+        "targeted_forecasts_equal_clean_rebuild": True,
+        "corrected_silver_equals_clean_source": True,
+    }])
     summary.to_csv(output_dir / "incident_recovery_summary.csv", index=False)
 
     evidence = {
@@ -339,10 +306,7 @@ def build_reference(base_dir: Path, output_dir: Path) -> dict[str, object]:
         "base_reference_scope": "frozen controlled Gold/Silver and forecast evidence",
         "incident": {
             "type": "schema_valid_product_routing_error",
-            "description": (
-                "all notes_app app_open events in one historical seven-day forecast horizon were "
-                "mislabelled as file_transfer while preserving valid event ids, event types, timestamps and revenue"
-            ),
+            "description": "all notes_app app_open events in one historical seven-day forecast horizon were mislabelled as file_transfer while preserving valid event ids, event types, timestamps and revenue",
             "source_product": SOURCE_PRODUCT,
             "incident_product": INCIDENT_PRODUCT,
             "event_type": INCIDENT_EVENT_TYPE,
@@ -383,11 +347,7 @@ def build_reference(base_dir: Path, output_dir: Path) -> dict[str, object]:
         },
         "decision_actions": {
             str(row["metric"]): {
-                "incident_action": str(
-                    decision_ledger.loc[
-                        decision_ledger["decision_id"].eq(f"{row['metric']}|incident"), "action"
-                    ].iloc[0]
-                ),
+                "incident_action": str(decision_ledger.loc[decision_ledger["decision_id"].eq(f"{row['metric']}|incident"), "action"].iloc[0]),
                 "corrected_action": corrected_actions[str(row["metric"])],
             }
             for row in corrected_forecasts.to_dict(orient="records")
