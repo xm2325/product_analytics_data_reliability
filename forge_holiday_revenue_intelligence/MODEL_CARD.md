@@ -20,7 +20,7 @@ It is a portfolio/research system. It is **not** a live model for Forge Holiday 
 
 **Calibration:** isotonic probability calibration is fitted on a separate calibration period.
 
-**Latest future test:** HGB ROC-AUC 0.839, average precision 0.708, Brier 0.159. The top-risk 10% has an 84.5% cancellation rate versus 31.6% overall.
+**Latest future test:** HGB ROC-AUC 0.839, average precision 0.708, Brier 0.159. The top-risk 10% has an 84.1% cancellation rate versus 31.6% overall.
 
 ### Booking-ADR reference
 
@@ -91,7 +91,7 @@ A trigger means **review/recalibrate/retrain assessment**, not automatic retrain
 
 ## Policy-sensitive feature test
 
-`deposit_type` is available in the source data and may be available at booking time, but it also reflects commercial policy. Removing it lowers Logistic Regression test average precision by 0.033 in the latest run.
+`deposit_type` is available in the source data and may be available at booking time, but it also reflects commercial policy. Removing it lowers Logistic Regression test average precision from 0.683 to 0.654, a difference of 0.029 in the latest run.
 
 The project keeps this ablation visible because a predictive feature can be operationally unstable if the business changes the policy that created the feature.
 
@@ -122,7 +122,7 @@ Do not use these models to:
 
 **Source-process uncertainty.** Some fields may be updated after initial booking in the original operating system even when their names look booking-time-safe. A real deployment needs source-event timestamps.
 
-**Policy dependence.** Deposit policy strongly affects cancellation signals.
+**Policy dependence.** Deposit policy affects cancellation signals and must be checked under policy changes.
 
 **Limited forecasting history.** The public dataset covers only a little over two years of arrivals, limiting seasonal forecasting experiments.
 
