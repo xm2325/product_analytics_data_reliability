@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+
+# Public source data are fetched at run time and are not committed.
+data/
+
+# CI/local outputs are reproducible artifacts, not source files.
+reports/generated/
