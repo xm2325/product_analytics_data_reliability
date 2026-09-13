@@ -1,0 +1,58 @@
+name: Forge Holiday Revenue Intelligence
+
+on:
+  push:
+    branches:
+      - forge-holiday-revenue-intelligence
+    paths:
+      - 'forge_holiday_revenue_intelligence/**'
+      - '.github/workflows/forge-holiday-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  validate-and-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: forge_holiday_revenue_intelligence
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: forge_holiday_revenue_intelligence/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run unit tests
+        run: pytest -q
+
+      - name: Run real-data pipeline
+        run: python src/run_pipeline.py --output-dir reports/generated
+
+      - name: Print decision summary
+        if: always()
+        run: |
+          if [ -f reports/generated/executive_summary.md ]; then
+            cat reports/generated/executive_summary.md
+          fi
+          if [ -f reports/generated/metrics.json ]; then
+            echo '--- metrics.json ---'
+            cat reports/generated/metrics.json
+          fi
+
+      - name: Upload generated evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: forge-holiday-revenue-evidence
+          path: |
+            forge_holiday_revenue_intelligence/reports/generated/metrics.json
+            forge_holiday_revenue_intelligence/reports/generated/executive_summary.md
+          if-no-files-found: warn
