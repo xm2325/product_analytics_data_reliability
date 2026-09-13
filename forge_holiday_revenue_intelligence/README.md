@@ -32,8 +32,8 @@ Model training, probability calibration, model selection, and final testing use 
 | Decision area | Future-period result | Decision |
 |---|---:|---|
 | Cancellation ranking | HGB ROC-AUC **0.839**, AP **0.708**, Brier **0.159** | HGB selected on the earlier validation period |
-| Top-risk capacity | Top 10% cancellation rate **84.5%** vs **31.6%** overall | Useful prioritisation signal, not a customer-action rule |
-| Policy-feature check | Removing `deposit_type` lowers test AP by **0.033** | Treat policy-sensitive features with care |
+| Top-risk capacity | Top 10% cancellation rate **84.1%** vs **31.6%** overall | Useful prioritisation signal, not a customer-action rule |
+| Policy-feature check | Removing `deposit_type` lowers Logistic Regression test AP by **0.029** | Treat policy-sensitive features with care |
 | Model monitoring | max PSI **0.463**, Brier change **+0.025**, gross-value proxy error **-12.5%** | **Review/recalibration flag triggered** |
 | Demand forecast | 4-week rolling WAPE **8.5%** vs selected Ridge **12.6%** | **Do not promote** the complex model |
 | ADR reference | median-model test MAE **24.71** ADR units | Keep as decision support only |
