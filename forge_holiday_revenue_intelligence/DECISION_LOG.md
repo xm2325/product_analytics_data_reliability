@@ -1,6 +1,6 @@
 # Decision log
 
-Validated against GitHub Actions run from commit `98336ea30c93a5a3909fe4ddcfdf497cb7f2b4e5` on 13 September 2026.
+Validated against the latest reproducible GitHub Actions run on 13 September 2026.
 
 ## Release decision 1 — cancellation model
 
@@ -12,7 +12,7 @@ Validation results:
 
 | Model | ROC-AUC | Average precision | Brier |
 |---|---:|---:|---:|
-| Logistic Regression | 0.861 | 0.822 | 0.143 |
+| Logistic Regression | 0.861 | 0.820 | 0.143 |
 | HGB | 0.881 | 0.841 | 0.134 |
 
 The pre-set gate requires HGB to improve validation average precision by at least 0.01 and not worsen Brier by more than 0.005. HGB passes and becomes the champion before the test period is examined.
@@ -21,7 +21,7 @@ Future test:
 
 | Model | ROC-AUC | Average precision | Brier |
 |---|---:|---:|---:|
-| Logistic Regression | 0.821 | 0.685 | 0.158 |
+| Logistic Regression | 0.821 | 0.683 | 0.158 |
 | HGB | 0.839 | 0.708 | 0.159 |
 
 **Decision:** HGB remains the selected model, but it is immediately subject to the later-period health check below. The test result is used for evaluation/monitoring, not retrospective model selection.
@@ -43,9 +43,9 @@ The correct action is not to silently retrain. First check feature/process chang
 
 ## Release decision 3 — policy-sensitive cancellation feature
 
-Removing `deposit_type` reduces Logistic Regression future-test average precision from **0.685** to **0.652**, a drop of **0.033**.
+Removing `deposit_type` reduces Logistic Regression future-test average precision from **0.683** to **0.654**, a drop of **0.029**.
 
-The top 10% cancellation rate without deposit type is still **80.6%**, compared with **84.5%** for the selected full HGB model.
+The top 10% cancellation rate without deposit type is **79.3%**, compared with **84.1%** for the selected full HGB model.
 
 **Decision:** keep the full benchmark for this public-data experiment, but make dependency on deposit policy explicit. In a real marketplace, validate stability before using such a feature because a commercial-policy change can alter its meaning quickly.
 
